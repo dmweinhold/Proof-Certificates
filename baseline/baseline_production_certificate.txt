@@ -1,0 +1,29 @@
+========================================================================
+BASELINE REPAIRED BRONZE THEOREM CERTIFICATE
+========================================================================
+phi                           = 0.295816
+target half-budget            = 2.525
+tau bracket                   = (0.30471, 0.30472)
+
+Step 1. Certified bracket for tau-bar
+  S_F(0.30471) upper        = 2.524946152240423014274168750280858592862080923938157996358062835325236810191106176518801087057195981
+  S_F(0.30472) lower       = 2.525009022884267982321795716698638644410947883297101352953602381340251156772853883554462357668651847
+  lower endpoint check        = PASS
+  upper endpoint check        = PASS
+
+Step 2. Certified monotonicity on [0.30, 0.31]
+  derivative formula          = 0.1 + 9.9*sqrt(1-2*tau) - (400*tau^2 - 800*tau + 301)/(20*(1-tau)^2)
+  certified derivative upper  = -2.969302477764568106315660169778319344051607354748315580781324064940050766596349138064919357653883375
+  monotonicity status         = PASS
+
+Step 3. Baseline direct reduction
+  L_ME(0.30472, 1-0.30472) lower = 2.701330704259013109185872064969304733571967484785222535042903562517924181412409685434116420275983175
+  Theta_0 exact               = 2.65512920
+  value margin lower          = 0.046201504259013109185872064969304733571967484785222535042903562517924181412409685434116420275983175
+
+Certified theorem inequality
+  L_ME(0.30472, 1-0.30472) > 2.7013307  : PASS
+  Theta_0 = 2.65512920        : PASS
+  margin > 0.04620            : PASS
+
+STATUS: BASELINE CERTIFICATE PASSES.

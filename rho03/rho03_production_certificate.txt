@@ -1,0 +1,111 @@
+========================================================================
+rho = 0.3 PRODUCTION CERTIFICATE
+========================================================================
+source centers               = ORIGINAL_rho03_deterministic_band_reduction.txt
+phi                          = 0.295816
+v_low                        = 0.325
+value host                   = A <= Q_A(1-phi)
+cost host                    = A <= Q_A(sqrt(1-2phi))
+threshold                    = 2.36411805
+total budget                 = 2.525000000000000
+
+Final theorem-object verdict
+  value side status          = PASS
+  cost side status           = PASS
+  value total margin         = 0.0030623905502368545053513698916213211632507526325312140159588640164122813841546
+  value increment margin     = 0.0030623905502368545053513698916213211632507526325312140159588640164122813841546
+  cost slack                 = 0.010225850720026
+
+STATUS: BOTH CERTIFICATE INEQUALITIES PASS.
+Within the frozen appendix object, the revised rho = 0.3 corollary is numerically certified at v_low = 0.325.
+
+CAVEAT: This script does not yet independently certify the supporting constants V_FA_low = 1.360955 and threshold = 2.36411805. It treats them as frozen corollary inputs.
+
+========================================================================
+VALUE-SIDE CERTIFICATE
+========================================================================
+phi                        = 0.295816
+v_low                      = 0.325
+rho                        = 0.3
+sigma                      = 0.95393920141694564915262158602322654025462342525054575390815185291036255230565072
+
+Brackets for x_value = Phi^{-1}(1-phi)
+  x_lo                     = 0.536472253270144
+  x_hi                     = 0.536472753270144
+
+Brackets for value-host mass cutoffs
+  d_val(phi)_lo            = 0.051098921604505
+  d_val(phi)_hi            = 0.051108921604505
+  d_val(phi+v)_lo          = -1.3035963758521738
+  d_val(phi+v)_hi          = -1.3035863758521738
+
+Mass checks at the certified brackets
+  mass_lo(d_val(phi)_lo)   = 0.29581723823734878914188496405659923969293854493330984682259600294652963785122327
+  target phi               = 0.295816
+  mass_hi(d_val(phi)_hi)   = 0.29581478095808671935271429014065819422218411200632242270635678007629002518283594
+  mass_lo(d_val(phi+v)_lo) = 0.62081645838044545549774221139278659142101956655758251122992770394333661729303395
+  target phi+v             = 0.620816
+  mass_hi(d_val(phi+v)_hi) = 0.62081569130164481948754894679315545936234786636647706536824771383939382588238679
+
+Value increment bounds
+  Delta M lower            = 1.0062254405502368545053513698916213211632507526325312140159588640164122813841546
+  Delta M upper            = 1.0062264466618675664054910151174406313783802950694269429212353632823901710883412
+  increment target         = 1.00316305
+  lower margin             = 0.0030623905502368545053513698916213211632507526325312140159588640164122813841546
+
+Total value bounds
+  V_FA_low                 = 1.360955
+  total lower              = 2.3671804405502368545053513698916213211632507526325312140159588640164122813841546
+  total upper              = 2.3671814466618675664054910151174406313783802950694269429212353632823901710883412
+  threshold                = 2.36411805
+  lower margin             = 0.0030623905502368545053513698916213211632507526325312140159588640164122813841546
+
+STATUS: value-side certificate PASSES.
+NOTE: V_FA_low and the threshold are treated here as frozen supporting inputs; their independent certification is separate.
+
+========================================================================
+COST-SIDE CERTIFICATE
+========================================================================
+phi                             = 0.295816000000
+delta                           = 0.005916320000
+v_low                           = 0.325000000000
+rho                             = 0.300000000000
+sigma                           = 0.953939201416946
+
+Nominal floating centers
+  nominal c_up                  = 1.471818349012837
+  nominal c_J                   = 0.293037967048754
+  nominal x_cont                = 0.355885320368542
+  nominal d_cont(v_low)         = -1.083577797106036
+  nominal continuation cost     = 1.042530173901340
+
+Certified cutoff brackets
+  max band cutoff width         = 1.000000000139778e-05
+  final cutoff c_J_lo           = 0.293033967048754
+  final cutoff c_J_hi           = 0.293041967048754
+  continuation d_lo             = -1.083585797106036
+  continuation d_hi             = -1.083567797106036
+
+Mass checks
+  min band lower margin         = 6.662287651247600e-09
+  min band upper margin         = 7.722563391716897e-09
+  cont mass_lo(d_lo) - v_low    = 1.950658816696205e-07
+  v_low - cont mass_hi(d_hi)    = 5.201267533339049e-08
+
+Cost bounds
+  c_up upper                    = 1.472231644086541
+  c_up over nominal             = 0.000413295073704
+  continuation cost upper       = 1.042542505193433
+  cont cost over nominal        = 0.000012331292093
+  total spend upper             = 2.514774149279974
+  total budget                  = 2.525000000000000
+  certified slack               = 0.010225850720026
+
+Band-level diagnostics
+  worst band gap index          = 30
+  worst band gap                = 0.000009644063750
+  band 1 upper                  = 0.043390426912588
+  band 50 upper                 = 0.020737177813440
+
+STATUS: cost-side certificate PASSES.
+

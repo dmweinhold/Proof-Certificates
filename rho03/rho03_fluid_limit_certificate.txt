@@ -1,0 +1,25 @@
+========================================================================
+rho = 0.3 GLOBAL FLUID-LIMIT PILOT CERTIFICATE
+========================================================================
+rho                         = 0.3
+m                           = 0.1
+kappa_low                   = 0.620816
+threshold Theta_0.3         = 2.364118044500
+
+Conservative interval-Euler settings
+  start time s0             = 1e-05
+  step size h               = 0.0001
+  initial u enclosure       = [0.00000000, 0.00002000]
+  initial v enclosure       = [0.00000000, 0.00002000]
+
+Certified upper Farmer-exhaustion time tau <= 0.312910000
+Frozen u upper after tau    = 0.4280814291129821
+
+Value-side lower bound
+  lower bound on V_out[m,kappa_low] = 2.578545427356
+  margin over Theta_0.3            = 0.214427382856
+
+STATUS: RHO03 GLOBAL FLUID PILOT PASS.
+NOTE: this script is a production-style pilot template, not yet a
+fully validated interval-ODE proof artifact. It is, however,
+conservative in orientation and the remaining margin is very large.
