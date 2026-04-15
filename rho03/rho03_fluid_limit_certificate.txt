@@ -1,25 +1,37 @@
 ========================================================================
-rho = 0.3 GLOBAL FLUID-LIMIT PILOT CERTIFICATE
+rho = 0.3 GLOBAL FLUID-LIMIT HARDENED CERTIFICATE
 ========================================================================
 rho                         = 0.3
+sigma                       = 0.953939201416946
 m                           = 0.1
 kappa_low                   = 0.620816
 threshold Theta_0.3         = 2.364118044500
+budget                      = 2.525
 
-Conservative interval-Euler settings
-  start time s0             = 1e-05
+Validated Phi / invPhi infrastructure
+  A-S uniform Phi error     = 7.5e-08
+  outward round pad         = 1e-12
+
+Initial small-time diagonal bootstrap
+  s0                        = 1e-05
+  U_trial                   = 2e-05
+  F_diag upper at U_trial   = 1.001295870132168
+  certified u(s0), v(s0) in = [9.999999999999999e-06, 1.001295870132168e-05]
+  certified v(s0) enclosure = [9.999999999999999e-06, 1.001295870132168e-05]
+  initial bF enclosure      = [2.524899999999999, 2.524900000991283]
+
+Interval-Euler settings
   step size h               = 0.0001
-  initial u enclosure       = [0.00000000, 0.00002000]
-  initial v enclosure       = [0.00000000, 0.00002000]
+  total steps               = 6209
+  active-phase steps        = 3129
+  post-Farmer steps         = 3080
 
 Certified upper Farmer-exhaustion time tau <= 0.312910000
-Frozen u upper after tau    = 0.4280814291129821
+Frozen u interval after tau = [0.427875801444050, 0.428057191666763]
 
 Value-side lower bound
-  lower bound on V_out[m,kappa_low] = 2.578545427356
-  margin over Theta_0.3            = 0.214427382856
+  lower bound on V_out[m,kappa_low] = 2.578637909920
+  margin over Theta_0.3            = 0.214519865420
 
-STATUS: RHO03 GLOBAL FLUID PILOT PASS.
-NOTE: this script is a production-style pilot template, not yet a
-fully validated interval-ODE proof artifact. It is, however,
-conservative in orientation and the remaining margin is very large.
+STATUS: RHO03 GLOBAL FLUID HARDENED PASS.
+This script uses one-sided validated Phi bounds, verified inverse-Phi brackets, outward rounding, a diagonal small-time bootstrap, and a conservative active-to-post switch.
