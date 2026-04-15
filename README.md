@@ -268,7 +268,7 @@ with the specified library versions.
 
 ## Zenodo Archive
 
-DOI: 10.5281/zenodo.17114490
+DOI 10.5281/zenodo.19598799
 
 ## Citation
 

@@ -130,7 +130,7 @@ certificates/
    numpy>=1.24.0
    ```
 
-4. **Upload to Zenodo** (DOI: 10.5281/zenodo.17114490)
+4. **Upload to Zenodo** (DOI 10.5281/zenodo.19598799)
 
 5. **Confirm cross-references** between certificate outputs and
    paper propositions match the final manuscript version.
