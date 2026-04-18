@@ -1,0 +1,71 @@
+==============================================================================
+ VALIDATED CERTIFICATE: Baseline closed-form asymptotic gap
+ Theorem: lim N^-1 E[PC^ME - PC^MX] = mu_E * phi - S_G(tau)
+==============================================================================
+
+Working precision: 80 decimal digits (mpmath)
+
+Theorem object (baseline, rho = 0):
+  Support:      [0.1, 10.0]
+  mu_E = mu_A = 5.05
+  Budget/item:  2.525  (parity: mu_A / 2)
+
+------------------------------------------------------------------------------
+Step 1: Certify phi (MX Farmer-exhaustion share)
+------------------------------------------------------------------------------
+  Defining equation: int_{1-phi}^{1} Q_A(v) dv = mu_A / 2
+  Reduces to quadratic: 9.9 * phi^2 - 20 * phi + 5.05 = 0
+  Root in (0, 1/2):  phi = (10 - sqrt(50.005)) / 9.9
+
+  Certified enclosure:
+    phi_lo = 0.295816024604275185145695324199
+    phi_hi = 0.295816024604275185145695324199
+
+------------------------------------------------------------------------------
+Step 2: Certify tau (ME Farmer-exhaustion share)
+------------------------------------------------------------------------------
+  Defining equation: S_F(tau) = mu_A / 2 = 2.525,
+    where S_F(s) = 0.1*s + 3.3*(1 - (1-2s)^{3/2})
+  S_F is strictly increasing, so bisection yields a valid bracket.
+
+  Certified enclosure (bracket width < 1e-50):
+    tau_lo = 0.304718564833907268471116903263
+    tau_hi = 0.304718564833907268471116903263
+
+------------------------------------------------------------------------------
+Step 3: Certify S_G(tau)
+------------------------------------------------------------------------------
+  S_G(s) = 0.1*s + 1.65*(1 - (1-2s)^{3/2})
+  S_G is strictly increasing on [0, 1/2], so S_G applied
+  to the tau bracket yields a valid enclosure of S_G(tau).
+
+  Certified enclosure:
+    S_G(tau)_lo = 1.27773592824169536342355584516
+    S_G(tau)_hi = 1.27773592824169536342355584516
+
+------------------------------------------------------------------------------
+Step 4: Certify mu_E * phi
+------------------------------------------------------------------------------
+  mu_E = 5.05 is exact; phi is enclosed from Step 1.
+
+  Certified enclosure:
+    (mu_E * phi)_lo = 1.49387092425158968498576138721
+    (mu_E * phi)_hi = 1.49387092425158968498576138721
+
+------------------------------------------------------------------------------
+Step 5: Certify the asymptotic gap
+------------------------------------------------------------------------------
+  Gap = mu_E * phi - S_G(tau)
+
+  Certified enclosure:
+    gap_lo = 0.216134996009894321562205542044
+    gap_hi = 0.216134996009894321562205542044
+
+  To 5 decimal places: [0.216135, 0.216135]
+
+==============================================================================
+ CERTIFICATE VALID: All sanity checks passed.
+ The asymptotic gap is certified strictly positive.
+==============================================================================
+
+Machine-readable summary written to: baseline_closed_form_certificate_summary.json
