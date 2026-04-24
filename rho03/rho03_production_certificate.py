@@ -1,653 +1,273 @@
 #!/usr/bin/env python3
-"""Production certificate script for the rho = 0.3 dual-host appendix object.
+r"""
+rho03_fluid_limit_certificate_picard.py
 
-This script combines the validated-style value-side and cost-side pilots into a
-single executable certificate for the revised two-host corollary.
+Validated Picard step-tube certificate for the rho = 0.3 fluid-limit ODE.
 
-What it certifies
------------------
-With frozen theorem inputs
+The script encloses the hybrid ODE in tail coordinates
 
-    phi        = 0.295816
-    v_low      = 0.325
-    V_FA_low   = 1.360955      (taken here as a frozen supporting input)
-    threshold  = 2.36411805    (taken here as a frozen supporting input)
+    u = 1 - Phi(x),    v = 1 - Phi(c),
 
-it proves the two inequalities required by the revised rho = 0.3 corollary:
+using one-sided normal-CDF bounds, verified inverse-normal brackets, IEEE
+outward rounding, and a Picard step tube at every integration step.  Each step
+constructs a tube T_n satisfying
 
-1. Value side on the larger host H_val = {A <= Q_A(1-phi)}:
+    B_n + [0,h] F(T_n) \subseteq T_n,
 
-       V_FA_low + Delta M_GO_E,0.3(v_low) > threshold.
+and evaluates all drift, budget, Green-cost and ecological-value integrands on
+T_n, not on the endpoint box B_n.
 
-2. Cost side on the smaller frontier host
-   H_cost = {A <= Q_A(sqrt(1-2 phi))}:
+The validated state includes interval enclosures for
 
-       c_up + C_GO_cost(v_low) < 2.525.
+    u, v, b_F, b_G, C_G, V_out,
 
-Design notes
-------------
-- The value side uses Decimal arithmetic and one-sided normal-CDF bounds built
-  from the classical Abramowitz--Stegun rational approximation with a published
-  uniform absolute error bound.
-- The cost side reuses the same one-sided Phi bounds in ordinary double
-  precision, which is more than adequate because the explicit Phi error pad is
-  orders of magnitude larger than floating roundoff.
-- The original floating deterministic script is used only to obtain nominal
-  *centers* for band cutoffs and continuation roots. The final inequalities are
-  certified by one-sided bracketing and one-sided quadrature, not by trusting
-  those floating outputs.
-
-Outputs
--------
-Running the script writes three files next to the script:
-
-- rho03_production_certificate.txt   human-readable report
-- rho03_production_certificate.csv   certified band table for the cost side
-- rho03_production_certificate.json  machine-readable summary
-
-Limitations
------------
-This script treats V_FA_low = 1.360955 and threshold = 2.36411805 as frozen
-inputs from the appendix object. Their independent certification is a separate
-supporting step.
+where C_G is Green agricultural cost accumulated from 0 to kappa_low and
+V_out is ecological value accumulated only over [m, kappa_low].
 """
 
 from __future__ import annotations
 
-import csv
-import importlib.machinery
-import importlib.util
 import json
 import math
-import sys
+import statistics
 from dataclasses import asdict, dataclass
-from decimal import Decimal, getcontext
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Optional, Tuple
+
+SCRIPT_PATH = Path(__file__).resolve()
+OUTPUT_STEM = SCRIPT_PATH.stem
+REPORT_KIND = "PRODUCTION" if "production" in OUTPUT_STEM else "FLUID"
+
+norm = statistics.NormalDist()
+
+# ----------------------------------------------------------------------
+# Frozen theorem/certificate constants
+# ----------------------------------------------------------------------
+rho = 0.3
+sigma = math.sqrt(1.0 - rho * rho)
+ell = 0.1
+nu = 10.0
+d = nu - ell
+
+m = 0.10
+kappa_low = 0.620816
+# Coarser threshold supported by the revised paper's theta identity.
+theta_03 = 2.36413
+budget = 2.525
+
+# Initial diagonal bootstrap and Picard step size.
+s0 = 1.0e-5
+h = 1.0e-4
+
+# Truncated-normal quadrature for G_A.
+GA_T_MIN = -8.0
+GA_N = 96
+
+# Picard construction parameters.
+PICARD_MAX_ITER = 20
+PICARD_INFLATION = 1.25
+
+# ----------------------------------------------------------------------
+# Validated Phi / inverse-Phi infrastructure
+# ----------------------------------------------------------------------
+P = 0.2316419
+B1 = 0.319381530
+B2 = -0.356563782
+B3 = 1.781477937
+B4 = -1.821255978
+B5 = 1.330274429
+PHI_APPROX_ERR = 7.5e-8
+ROUND_PAD = 1.0e-12
+SQRT_2PI = math.sqrt(2.0 * math.pi)
+P_MIN = 1.0e-16
+P_MAX = 1.0 - 1.0e-16
 
 
-# =============================================================================
-# Locate and load the original floating deterministic script.
-# =============================================================================
-
-ROOT = Path(__file__).resolve().parent
-SOURCE_CANDIDATES = [
-    ROOT / "ORIGINAL_rho03_deterministic_band_reduction.txt",
-    ROOT / "rho03_deterministic_band_reduction.txt",
-]
+def down(x: float) -> float:
+    return math.nextafter(float(x), -math.inf)
 
 
-def find_source_script() -> Path:
-    for candidate in SOURCE_CANDIDATES:
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(
-        "Could not locate the original deterministic band-reduction script. "
-        "Expected one of: " + ", ".join(str(p.name) for p in SOURCE_CANDIDATES)
-    )
+def up(x: float) -> float:
+    return math.nextafter(float(x), math.inf)
 
 
-SRC = find_source_script()
+def clamp_prob(p: float) -> float:
+    if p <= P_MIN:
+        return P_MIN
+    if p >= P_MAX:
+        return P_MAX
+    return p
 
 
-def load_band_module():
-    name = "rho03_band_src_production_certificate"
-    loader = importlib.machinery.SourceFileLoader(name, str(SRC))
-    spec = importlib.util.spec_from_loader(name, loader)
-    if spec is None:
-        raise RuntimeError("Could not create import spec for the source script")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    loader.exec_module(module)
-    return module
+def phi_pdf(x: float) -> float:
+    return math.exp(-0.5 * x * x) / SQRT_2PI
 
 
-mod = load_band_module()
-rows = mod.build_bands()
-
-
-# =============================================================================
-# Shared frozen theorem constants.
-# =============================================================================
-
-PHI_F = float(mod.PHI)
-DELTA_F = float(mod.DELTA)
-RHO_F = float(mod.RHO)
-SIGMA_F = float(mod.SIGMA)
-TOTAL_BUDGET_F = float(mod.TOTAL_BUDGET)
-V_LOW_F = 0.325
-THRESHOLD_F = 2.36411805
-V_FA_LOW_F = 1.360955
-
-# Decimal copies for the value-side layer.
-getcontext().prec = 80
-D = Decimal
-PHI_D = D("0.295816")
-V_LOW_D = D("0.325")
-RHO_D = D("0.3")
-SIGMA_D = (D("1") - RHO_D * RHO_D).sqrt()
-THRESHOLD_D = D("2.36411805")
-V_FA_LOW_D = D("1.360955")
-INCREMENT_TARGET_D = THRESHOLD_D - V_FA_LOW_D
-
-ONE_D = D("1")
-ZERO_D = D("0")
-TWO_D = D("2")
-TWENTY4_D = D("24")
-
-
-# =============================================================================
-# A-S Phi approximation constants, both float and Decimal.
-# =============================================================================
-
-P_F = 0.2316419
-B1_F = 0.319381530
-B2_F = -0.356563782
-B3_F = 1.781477937
-B4_F = -1.821255978
-B5_F = 1.330274429
-PHI_APPROX_ERR_F = 7.5e-8
-ROUND_PAD_F = 1.0e-12
-
-P_D = D("0.2316419")
-B1_D = D("0.319381530")
-B2_D = D("-0.356563782")
-B3_D = D("1.781477937")
-B4_D = D("-1.821255978")
-B5_D = D("1.330274429")
-PHI_APPROX_ERR_D = D("7.5e-8")
-ROUND_PAD_D = D("1e-30")
-
-PI_D = D(
-    "3.14159265358979323846264338327950288419716939937510582097494459230781640628620899"
-)
-SQRT_2PI_D = (TWO_D * PI_D).sqrt()
-SQRT_2PI_F = math.sqrt(2.0 * math.pi)
-BETA_F = RHO_F / SIGMA_F
-BETA_D = RHO_D / SIGMA_D
-
-
-# =============================================================================
-# Shared utility helpers.
-# =============================================================================
-
-
-def phi_pdf_float(x: float) -> float:
-    return math.exp(-0.5 * x * x) / SQRT_2PI_F
-
-
+@lru_cache(maxsize=500_000)
 def Phi_bounds_float(x: float) -> Tuple[float, float]:
-    """One-sided bounds for the standard normal CDF in float arithmetic."""
+    """Return (lo, hi) such that lo <= Phi(x) <= hi."""
+    x = float(x)
     if x >= 0.0:
-        t = 1.0 / (1.0 + P_F * x)
-        poly = (((((B5_F * t) + B4_F) * t + B3_F) * t + B2_F) * t + B1_F) * t
-        approx = 1.0 - phi_pdf_float(x) * poly
-        lo = max(0.0, approx - PHI_APPROX_ERR_F - ROUND_PAD_F)
-        hi = min(1.0, approx + PHI_APPROX_ERR_F + ROUND_PAD_F)
-    else:
-        lo_pos, hi_pos = Phi_bounds_float(-x)
-        lo = max(0.0, 1.0 - hi_pos)
-        hi = min(1.0, 1.0 - lo_pos)
+        t = 1.0 / (1.0 + P * x)
+        poly = (((((B5 * t) + B4) * t + B3) * t + B2) * t + B1) * t
+        approx = 1.0 - phi_pdf(x) * poly
+        lo = max(0.0, approx - PHI_APPROX_ERR - ROUND_PAD)
+        hi = min(1.0, approx + PHI_APPROX_ERR + ROUND_PAD)
+        return down(lo), up(hi)
+    lo_pos, hi_pos = Phi_bounds_float(-x)
+    return max(0.0, down(1.0 - hi_pos)), min(1.0, up(1.0 - lo_pos))
+
+
+@lru_cache(maxsize=500_000)
+def invPhi_lower(p: float) -> float:
+    """Return x with Phi(x) <= p, verified by Phi_bounds_float."""
+    p = clamp_prob(float(p))
+    center_p = max(P_MIN, p - (PHI_APPROX_ERR + ROUND_PAD))
+    x = norm.inv_cdf(center_p)
+    _, hi = Phi_bounds_float(x)
+    if hi <= p:
+        return down(x)
+
+    fail = x
+    step = 1.0e-6
+    while True:
+        cand = x - step
+        _, hi = Phi_bounds_float(cand)
+        if hi <= p:
+            good = cand
+            break
+        fail = cand
+        step *= 2.0
+        if cand < -50.0:
+            raise RuntimeError(f"invPhi_lower failed for p={p}")
+        x = cand
+
+    lo_x = good
+    hi_x = fail
+    for _ in range(80):
+        mid = (lo_x + hi_x) / 2.0
+        _, hi_mid = Phi_bounds_float(mid)
+        if hi_mid <= p:
+            lo_x = mid
+        else:
+            hi_x = mid
+    return down(lo_x)
+
+
+@lru_cache(maxsize=500_000)
+def invPhi_upper(p: float) -> float:
+    """Return x with Phi(x) >= p, verified by Phi_bounds_float."""
+    p = clamp_prob(float(p))
+    center_p = min(P_MAX, p + (PHI_APPROX_ERR + ROUND_PAD))
+    x = norm.inv_cdf(center_p)
+    lo, _ = Phi_bounds_float(x)
+    if lo >= p:
+        return up(x)
+
+    fail = x
+    step = 1.0e-6
+    while True:
+        cand = x + step
+        lo, _ = Phi_bounds_float(cand)
+        if lo >= p:
+            good = cand
+            break
+        fail = cand
+        step *= 2.0
+        if cand > 50.0:
+            raise RuntimeError(f"invPhi_upper failed for p={p}")
+        x = cand
+
+    lo_x = fail
+    hi_x = good
+    for _ in range(80):
+        mid = (lo_x + hi_x) / 2.0
+        lo_mid, _ = Phi_bounds_float(mid)
+        if lo_mid >= p:
+            hi_x = mid
+        else:
+            lo_x = mid
+    return up(hi_x)
+
+
+def q_interval_from_tail(uL: float, uU: float) -> Tuple[float, float]:
+    """For u in [uL,uU], q(u)=Phi^{-1}(1-u) lies in [xL,xU]."""
+    p_lo = clamp_prob(1.0 - uU)
+    p_hi = clamp_prob(1.0 - uL)
+    return invPhi_lower(p_lo), invPhi_upper(p_hi)
+
+
+# ----------------------------------------------------------------------
+# Drift and integrand interval arithmetic
+# ----------------------------------------------------------------------
+
+def F1_interval_point(u: float, v: float) -> Tuple[float, float]:
+    px = clamp_prob(1.0 - u)
+    pc = clamp_prob(1.0 - v)
+    x_lo = invPhi_lower(px)
+    x_hi = invPhi_upper(px)
+    c_lo = invPhi_lower(pc)
+    c_hi = invPhi_upper(pc)
+    z_lo = down((c_lo - rho * x_hi) / sigma)
+    z_hi = up((c_hi - rho * x_lo) / sigma)
+    lo_zlo, _ = Phi_bounds_float(z_lo)
+    _, hi_zhi = Phi_bounds_float(z_hi)
+    if lo_zlo <= 0.0 or hi_zhi <= 0.0:
+        raise RuntimeError("Nonpositive Phi bound in F1_interval_point")
+    return down(1.0 / hi_zhi), up(1.0 / lo_zlo)
+
+
+def F2_interval_point(u: float, v: float) -> Tuple[float, float]:
+    px = clamp_prob(1.0 - u)
+    pc = clamp_prob(1.0 - v)
+    x_lo = invPhi_lower(px)
+    x_hi = invPhi_upper(px)
+    c_lo = invPhi_lower(pc)
+    c_hi = invPhi_upper(pc)
+    z_lo = down((x_lo - rho * c_hi) / sigma)
+    z_hi = up((x_hi - rho * c_lo) / sigma)
+    lo_zlo, _ = Phi_bounds_float(z_lo)
+    _, hi_zhi = Phi_bounds_float(z_hi)
+    if lo_zlo <= 0.0 or hi_zhi <= 0.0:
+        raise RuntimeError("Nonpositive Phi bound in F2_interval_point")
+    return down(1.0 / hi_zhi), up(1.0 / lo_zlo)
+
+
+def F1_box(uL: float, uU: float, vL: float, vU: float) -> Tuple[float, float]:
+    # F1 decreases in u and increases in v.
+    lo, _ = F1_interval_point(uU, vL)
+    _, hi = F1_interval_point(uL, vU)
     return lo, hi
 
 
-def phi_pdf_decimal(x: Decimal) -> Decimal:
-    return (-(x * x) / TWO_D).exp() / SQRT_2PI_D
-
-
-def Phi_bounds_decimal(x: Decimal) -> Tuple[Decimal, Decimal]:
-    """One-sided bounds for the standard normal CDF in Decimal arithmetic."""
-    if x >= 0:
-        t = ONE_D / (ONE_D + P_D * x)
-        poly = (((((B5_D * t) + B4_D) * t + B3_D) * t + B2_D) * t + B1_D) * t
-        approx = ONE_D - phi_pdf_decimal(x) * poly
-        lo = approx - PHI_APPROX_ERR_D - ROUND_PAD_D
-        hi = approx + PHI_APPROX_ERR_D + ROUND_PAD_D
-    else:
-        lo_pos, hi_pos = Phi_bounds_decimal(-x)
-        lo = ONE_D - hi_pos
-        hi = ONE_D - lo_pos
-
-    if lo < ZERO_D:
-        lo = ZERO_D
-    if hi > ONE_D:
-        hi = ONE_D
+def F2_box(uL: float, uU: float, vL: float, vU: float) -> Tuple[float, float]:
+    # F2 increases in u and decreases in v.
+    lo, _ = F2_interval_point(uL, vU)
+    _, hi = F2_interval_point(uU, vL)
     return lo, hi
 
 
-# =============================================================================
-# Value-side production certificate.
-# =============================================================================
-
-# Floating centers used only to seed rigorous brackets.
-X_VALUE_CENTER_D = D("0.536472553270144")
-D_PHI_CENTER_D = D("0.051103921604505")
-D_PHI_PLUS_V_CENTER_D = D("-1.3035913758521738")
-
-X_STEP_D = D("1e-7")
-ROOT_STEP_D = D("5e-6")
-ROOT_YMAX_D = D("8")
-ROOT_N_D = 4000
-VALUE_N_D = 2000
-
-
-@dataclass
-class ValueCertificateResult:
-    x_lo: str
-    x_hi: str
-    d_phi_lo: str
-    d_phi_hi: str
-    d_phi_plus_v_lo: str
-    d_phi_plus_v_hi: str
-    delta_lower: str
-    delta_upper: str
-    increment_target: str
-    increment_margin: str
-    total_lower: str
-    total_upper: str
-    threshold: str
-    total_margin: str
-    status: str
-
-
-
-def max_abs_decimal(a: Decimal, b: Decimal) -> Decimal:
-    aa = abs(a)
-    bb = abs(b)
-    return aa if aa > bb else bb
-
-
-
-def phi_max_interval_decimal(a: Decimal, b: Decimal) -> Decimal:
-    if a > b:
-        a, b = b, a
-    if a <= ZERO_D <= b:
-        return phi_pdf_decimal(ZERO_D)
-    pa = phi_pdf_decimal(a)
-    pb = phi_pdf_decimal(b)
-    return pa if pa > pb else pb
-
-
-
-def abs_z_phi_max_interval_decimal(a: Decimal, b: Decimal) -> Decimal:
-    if a > b:
-        a, b = b, a
-    candidates = [abs(a) * phi_pdf_decimal(a), abs(b) * phi_pdf_decimal(b)]
-    if a <= ONE_D <= b:
-        candidates.append(phi_pdf_decimal(ONE_D))
-    if a <= -ONE_D <= b:
-        candidates.append(phi_pdf_decimal(ONE_D))
-    return max(candidates)
-
-
-
-def abs_z2_minus1_max_interval_decimal(a: Decimal, b: Decimal) -> Decimal:
-    if a > b:
-        a, b = b, a
-    vals = [abs(a * a - ONE_D), abs(b * b - ONE_D)]
-    if a <= ZERO_D <= b:
-        vals.append(ONE_D)
-    return max(vals)
-
-
-
-def h_value_decimal(y: Decimal, x_value: Decimal) -> Decimal:
-    return (x_value - RHO_D * y) / SIGMA_D
-
-
-
-def mass_integrand_midpoint_bounds_value(y: Decimal, x_lo: Decimal, x_hi: Decimal) -> Tuple[Decimal, Decimal]:
-    py = phi_pdf_decimal(y)
-    lo_h, _ = Phi_bounds_decimal(h_value_decimal(y, x_lo))
-    _, hi_h = Phi_bounds_decimal(h_value_decimal(y, x_hi))
-    return py * lo_h, py * hi_h
-
-
-
-def mass_cell_second_derivative_bound_value(a: Decimal, b: Decimal, x_upper: Decimal) -> Decimal:
-    if a > b:
-        a, b = b, a
-
-    phi_y_max = phi_max_interval_decimal(a, b)
-    y_abs_max = max_abs_decimal(a, b)
-    y2m1_max = abs_z2_minus1_max_interval_decimal(a, b)
-
-    h_left = h_value_decimal(a, x_upper)
-    h_right = h_value_decimal(b, x_upper)
-
-    _, a_max = Phi_bounds_decimal(h_left)
-    a_prime_abs = BETA_D * phi_max_interval_decimal(h_right, h_left)
-    a_second_abs = (BETA_D * BETA_D) * abs_z_phi_max_interval_decimal(h_right, h_left)
-
-    return phi_y_max * (
-        a_second_abs + TWO_D * y_abs_max * a_prime_abs + a_max * y2m1_max
-    )
-
-
-
-def midpoint_mass_bounds_value(
-    d: Decimal,
-    x_lo: Decimal,
-    x_hi: Decimal,
-    *,
-    ymax: Decimal = ROOT_YMAX_D,
-    n: int = ROOT_N_D,
-) -> Tuple[Decimal, Decimal]:
-    """Bounds for m(d) = int_d^inf phi(y) Phi((x-rho y)/sigma) dy."""
-    w = (ymax - d) / D(n)
-    lo_total = ZERO_D
-    hi_total = ZERO_D
-    x_upper = x_hi if x_hi > x_lo else x_lo
-
-    for i in range(n):
-        left = d + w * D(i)
-        right = left + w
-        mid = (left + right) / TWO_D
-
-        f_lo_mid, f_hi_mid = mass_integrand_midpoint_bounds_value(mid, x_lo, x_hi)
-        m2 = mass_cell_second_derivative_bound_value(left, right, x_upper)
-        rem = m2 * (w ** 3) / TWENTY4_D
-
-        lo_total += w * f_lo_mid - rem
-        hi_total += w * f_hi_mid + rem
-
-    Phi_ymax_lo, _ = Phi_bounds_decimal(ymax)
-    hi_total += ONE_D - Phi_ymax_lo
-    if lo_total < ZERO_D:
-        lo_total = ZERO_D
-    return lo_total, hi_total
-
-
-
-def value_integrand_midpoint_bounds(y: Decimal, x_lo: Decimal, x_hi: Decimal) -> Tuple[Decimal, Decimal]:
-    py = phi_pdf_decimal(y)
-
-    Ay_lo, Ay_hi = Phi_bounds_decimal(y)
-    A_lo = D("0.1") + D("9.9") * Ay_lo
-    A_hi = D("0.1") + D("9.9") * Ay_hi
-
-    h_lo, _ = Phi_bounds_decimal(h_value_decimal(y, x_lo))
-    _, h_hi = Phi_bounds_decimal(h_value_decimal(y, x_hi))
-
-    return A_lo * py * h_lo, A_hi * py * h_hi
-
-
-
-def value_cell_second_derivative_bound(a: Decimal, b: Decimal, x_upper: Decimal) -> Decimal:
-    if a > b:
-        a, b = b, a
-
-    phi_y_max = phi_max_interval_decimal(a, b)
-    y_abs_max = max_abs_decimal(a, b)
-    y2m1_max = abs_z2_minus1_max_interval_decimal(a, b)
-
-    _, Phi_b_hi = Phi_bounds_decimal(b)
-    A_max = D("0.1") + D("9.9") * Phi_b_hi
-    A_prime_abs = D("9.9") * phi_y_max
-    A_second_abs = D("9.9") * abs_z_phi_max_interval_decimal(a, b)
-
-    h_left = h_value_decimal(a, x_upper)
-    h_right = h_value_decimal(b, x_upper)
-    _, small_a_max = Phi_bounds_decimal(h_left)
-    small_a_prime_abs = BETA_D * phi_max_interval_decimal(h_right, h_left)
-    small_a_second_abs = (BETA_D * BETA_D) * abs_z_phi_max_interval_decimal(h_right, h_left)
-
-    B_max = A_max * small_a_max
-    B_prime_abs = A_prime_abs * small_a_max + A_max * small_a_prime_abs
-    B_second_abs = (
-        A_second_abs * small_a_max
-        + TWO_D * A_prime_abs * small_a_prime_abs
-        + A_max * small_a_second_abs
-    )
-
-    return phi_y_max * (
-        B_second_abs + TWO_D * y_abs_max * B_prime_abs + B_max * y2m1_max
-    )
-
-
-
-def midpoint_value_bounds(left: Decimal, right: Decimal, x_lo: Decimal, x_hi: Decimal, *, n: int = VALUE_N_D) -> Tuple[Decimal, Decimal]:
-    if right <= left:
-        return ZERO_D, ZERO_D
-
-    w = (right - left) / D(n)
-    lo_total = ZERO_D
-    hi_total = ZERO_D
-    x_upper = x_hi if x_hi > x_lo else x_lo
-
-    for i in range(n):
-        a = left + w * D(i)
-        b = a + w
-        mid = (a + b) / TWO_D
-
-        f_lo_mid, f_hi_mid = value_integrand_midpoint_bounds(mid, x_lo, x_hi)
-        m2 = value_cell_second_derivative_bound(a, b, x_upper)
-        rem = m2 * (w ** 3) / TWENTY4_D
-
-        lo_total += w * f_lo_mid - rem
-        hi_total += w * f_hi_mid + rem
-
-    if lo_total < ZERO_D:
-        lo_total = ZERO_D
-    return lo_total, hi_total
-
-
-
-def bracket_x_value(center: Decimal = X_VALUE_CENTER_D, step: Decimal = X_STEP_D) -> Tuple[Decimal, Decimal]:
-    target = ONE_D - PHI_D
-
-    x_lo = center
-    while True:
-        _, hi = Phi_bounds_decimal(x_lo)
-        if hi <= target:
-            break
-        x_lo -= step
-
-    x_hi = center
-    while True:
-        lo, _ = Phi_bounds_decimal(x_hi)
-        if lo >= target:
-            break
-        x_hi += step
-
-    return x_lo, x_hi
-
-
-
-def bracket_mass_root_value(
-    target_mass: Decimal,
-    center: Decimal,
-    x_lo: Decimal,
-    x_hi: Decimal,
-    *,
-    step: Decimal = ROOT_STEP_D,
-    ymax: Decimal = ROOT_YMAX_D,
-    n: int = ROOT_N_D,
-) -> Tuple[Decimal, Decimal]:
-    d_lo = center
-    while True:
-        lo_val, _ = midpoint_mass_bounds_value(d_lo, x_lo, x_hi, ymax=ymax, n=n)
-        if lo_val >= target_mass:
-            break
-        d_lo -= step
-
-    d_hi = center
-    while True:
-        _, hi_val = midpoint_mass_bounds_value(d_hi, x_lo, x_hi, ymax=ymax, n=n)
-        if hi_val <= target_mass:
-            break
-        d_hi += step
-
-    return d_lo, d_hi
-
-
-
-def run_value_certificate() -> Tuple[ValueCertificateResult, str]:
-    x_lo, x_hi = bracket_x_value()
-    d0_lo, d0_hi = bracket_mass_root_value(PHI_D, D_PHI_CENTER_D, x_lo, x_hi)
-    d1_lo, d1_hi = bracket_mass_root_value(PHI_D + V_LOW_D, D_PHI_PLUS_V_CENTER_D, x_lo, x_hi)
-
-    delta_lo, delta_hi = midpoint_value_bounds(d1_hi, d0_lo, x_lo, x_hi)
-    total_lo = V_FA_LOW_D + delta_lo
-    total_hi = V_FA_LOW_D + delta_hi
-
-    result = ValueCertificateResult(
-        x_lo=str(x_lo),
-        x_hi=str(x_hi),
-        d_phi_lo=str(d0_lo),
-        d_phi_hi=str(d0_hi),
-        d_phi_plus_v_lo=str(d1_lo),
-        d_phi_plus_v_hi=str(d1_hi),
-        delta_lower=str(delta_lo),
-        delta_upper=str(delta_hi),
-        increment_target=str(INCREMENT_TARGET_D),
-        increment_margin=str(delta_lo - INCREMENT_TARGET_D),
-        total_lower=str(total_lo),
-        total_upper=str(total_hi),
-        threshold=str(THRESHOLD_D),
-        total_margin=str(total_lo - THRESHOLD_D),
-        status="PASS" if delta_lo > INCREMENT_TARGET_D else "FAIL",
-    )
-
-    lines: List[str] = []
-    lines.append("=" * 72)
-    lines.append("VALUE-SIDE CERTIFICATE")
-    lines.append("=" * 72)
-    lines.append(f"phi                        = {PHI_D}")
-    lines.append(f"v_low                      = {V_LOW_D}")
-    lines.append(f"rho                        = {RHO_D}")
-    lines.append(f"sigma                      = {SIGMA_D}")
-    lines.append("")
-    lines.append("Brackets for x_value = Phi^{-1}(1-phi)")
-    lines.append(f"  x_lo                     = {x_lo}")
-    lines.append(f"  x_hi                     = {x_hi}")
-    lines.append("")
-    lines.append("Brackets for value-host mass cutoffs")
-    lines.append(f"  d_val(phi)_lo            = {d0_lo}")
-    lines.append(f"  d_val(phi)_hi            = {d0_hi}")
-    lines.append(f"  d_val(phi+v)_lo          = {d1_lo}")
-    lines.append(f"  d_val(phi+v)_hi          = {d1_hi}")
-    lines.append("")
-    lines.append("Mass checks at the certified brackets")
-    m0_lo, _ = midpoint_mass_bounds_value(d0_lo, x_lo, x_hi)
-    _, m0_hi = midpoint_mass_bounds_value(d0_hi, x_lo, x_hi)
-    m1_lo, _ = midpoint_mass_bounds_value(d1_lo, x_lo, x_hi)
-    _, m1_hi = midpoint_mass_bounds_value(d1_hi, x_lo, x_hi)
-    lines.append(f"  mass_lo(d_val(phi)_lo)   = {m0_lo}")
-    lines.append(f"  target phi               = {PHI_D}")
-    lines.append(f"  mass_hi(d_val(phi)_hi)   = {m0_hi}")
-    lines.append(f"  mass_lo(d_val(phi+v)_lo) = {m1_lo}")
-    lines.append(f"  target phi+v             = {PHI_D + V_LOW_D}")
-    lines.append(f"  mass_hi(d_val(phi+v)_hi) = {m1_hi}")
-    lines.append("")
-    lines.append("Value increment bounds")
-    lines.append(f"  Delta M lower            = {delta_lo}")
-    lines.append(f"  Delta M upper            = {delta_hi}")
-    lines.append(f"  increment target         = {INCREMENT_TARGET_D}")
-    lines.append(f"  lower margin             = {delta_lo - INCREMENT_TARGET_D}")
-    lines.append("")
-    lines.append("Total value bounds")
-    lines.append(f"  V_FA_low                 = {V_FA_LOW_D}")
-    lines.append(f"  total lower              = {total_lo}")
-    lines.append(f"  total upper              = {total_hi}")
-    lines.append(f"  threshold                = {THRESHOLD_D}")
-    lines.append(f"  lower margin             = {total_lo - THRESHOLD_D}")
-    lines.append("")
-    lines.append(
-        "STATUS: value-side certificate PASSES."
-        if result.status == "PASS"
-        else "STATUS: value-side certificate DOES NOT PASS."
-    )
-    lines.append(
-        "NOTE: V_FA_low and the threshold are treated here as frozen supporting inputs; "
-        "their independent certification is separate."
-    )
-
-    return result, "\n".join(lines) + "\n"
-
-
-# =============================================================================
-# Cost-side production certificate.
-# =============================================================================
-
-X_STEP_F = 1.0e-6
-C_STEP_F = 2.0e-6
-D_STEP_F = 2.0e-6
-T_MIN_F = -8.0
-T_MAX_F = 8.0
-MASS_N_F = 300
-COST_N_BAND1_F = 2000
-COST_N_BANDS_F = 1200
-COST_N_CONT_F = 1800
-
-
-@dataclass
-class CostBandCertificateRow:
-    j: int
-    x_lo: float
-    x_hi: float
-    c_prev_lo: float
-    c_prev_hi: float
-    c_lo: float
-    c_hi: float
-    nominal_cost: float
-    cost_upper: float
-    cost_gap: float
-
-
-@dataclass
-class CostCertificateResult:
-    nominal_c_up: float
-    nominal_c_last: float
-    nominal_x_cont: float
-    nominal_d_cont: float
-    nominal_cont_cost: float
-    max_cutoff_width: float
-    c_last_lo: float
-    c_last_hi: float
-    d_lo: float
-    d_hi: float
-    min_band_lower_margin: float
-    min_band_upper_margin: float
-    cont_lower_margin: float
-    cont_upper_margin: float
-    c_up_upper: float
-    c_up_gap: float
-    continuation_cost_upper: float
-    continuation_gap: float
-    total_upper: float
-    total_budget: float
-    slack_lower: float
-    worst_band_index: int
-    worst_band_gap: float
-    status: str
-
-
-
-def phi_max_interval_float(a: float, b: float) -> float:
+def phi_max_interval(a: float, b: float) -> float:
     if a > b:
         a, b = b, a
     if a <= 0.0 <= b:
-        return phi_pdf_float(0.0)
-    pa = phi_pdf_float(a)
-    pb = phi_pdf_float(b)
-    return pa if pa > pb else pb
+        return phi_pdf(0.0)
+    return max(phi_pdf(a), phi_pdf(b))
 
 
-
-def abs_z_phi_max_interval_float(a: float, b: float) -> float:
+def abs_z_phi_max_interval(a: float, b: float) -> float:
     if a > b:
         a, b = b, a
-    vals = [abs(a) * phi_pdf_float(a), abs(b) * phi_pdf_float(b)]
+    vals = [abs(a) * phi_pdf(a), abs(b) * phi_pdf(b)]
     if a <= 1.0 <= b:
-        vals.append(phi_pdf_float(1.0))
+        vals.append(phi_pdf(1.0))
     if a <= -1.0 <= b:
-        vals.append(phi_pdf_float(1.0))
+        vals.append(phi_pdf(1.0))
     return max(vals)
 
 
-
-def abs_z2_minus1_max_interval_float(a: float, b: float) -> float:
+def abs_z2_minus1_max_interval(a: float, b: float) -> float:
     if a > b:
         a, b = b, a
     vals = [abs(a * a - 1.0), abs(b * b - 1.0)]
@@ -656,557 +276,416 @@ def abs_z2_minus1_max_interval_float(a: float, b: float) -> float:
     return max(vals)
 
 
+def ga_numerator_point_bounds(x: float, c: float, *, n: int = GA_N) -> Tuple[float, float]:
+    """Bounds numerator int_{-inf}^a Phi(rho*c+sigma*t) phi(t) dt."""
+    mu = rho * c
+    a = (x - mu) / sigma
+    if a <= GA_T_MIN:
+        # Crude but safe: 0 <= numerator <= P(T<=a) <= Phi(a).
+        _, den_hi = Phi_bounds_float(a)
+        return 0.0, den_hi
 
-def h_mass_float(y: float, x: float) -> float:
-    return (x - RHO_F * y) / SIGMA_F
-
-
-
-def mass_integrand_midpoint_bounds_cost(y: float, x_lo: float, x_hi: float) -> Tuple[float, float]:
-    py = phi_pdf_float(y)
-    lo_h, _ = Phi_bounds_float(h_mass_float(y, x_lo))
-    _, hi_h = Phi_bounds_float(h_mass_float(y, x_hi))
-    return py * lo_h, py * hi_h
-
-
-
-def mass_cell_second_derivative_bound_cost(a: float, b: float, x_upper: float) -> float:
-    if a > b:
-        a, b = b, a
-
-    phi_y_max = phi_max_interval_float(a, b)
-    y_abs_max = max(abs(a), abs(b))
-    y2m1_max = abs_z2_minus1_max_interval_float(a, b)
-
-    h_left = h_mass_float(a, x_upper)
-    h_right = h_mass_float(b, x_upper)
-    _, a_max = Phi_bounds_float(h_left)
-    a_prime_abs = BETA_F * phi_max_interval_float(h_right, h_left)
-    a_second_abs = (BETA_F * BETA_F) * abs_z_phi_max_interval_float(h_right, h_left)
-
-    return phi_y_max * (
-        a_second_abs + 2.0 * y_abs_max * a_prime_abs + a_max * y2m1_max
-    )
-
-
-
-def midpoint_mass_bounds_cost(
-    left: float,
-    right: float,
-    x_lo: float,
-    x_hi: float,
-    *,
-    n: int = MASS_N_F,
-) -> Tuple[float, float]:
-    if right <= left:
-        return 0.0, 0.0
-
-    w = (right - left) / float(n)
+    width = (a - GA_T_MIN) / float(n)
     lo_total = 0.0
     hi_total = 0.0
-    x_upper = x_hi if x_hi > x_lo else x_lo
-
     for i in range(n):
-        a = left + w * i
-        b = a + w
-        mid = 0.5 * (a + b)
+        l = GA_T_MIN + width * i
+        r = l + width
+        mid = 0.5 * (l + r)
+        z_mid = mu + sigma * mid
+        zL = mu + sigma * l
+        zU = mu + sigma * r
+        phi_mid = phi_pdf(mid)
+        Phi_z_lo, Phi_z_hi = Phi_bounds_float(z_mid)
+        f_lo = Phi_z_lo * phi_mid
+        f_hi = Phi_z_hi * phi_mid
 
-        f_lo_mid, f_hi_mid = mass_integrand_midpoint_bounds_cost(mid, x_lo, x_hi)
-        m2 = mass_cell_second_derivative_bound_cost(a, b, x_upper)
-        rem = m2 * (w ** 3) / 24.0
-
-        lo_total += w * f_lo_mid - rem
-        hi_total += w * f_hi_mid + rem
-
+        # f(t)=A(t)B(t), A=Phi(mu+sigma t), B=phi(t).
+        A_max = Phi_bounds_float(zU)[1]
+        A1_abs = sigma * phi_max_interval(zL, zU)
+        A2_abs = sigma * sigma * abs_z_phi_max_interval(zL, zU)
+        B_max = phi_max_interval(l, r)
+        B1_abs = abs_z_phi_max_interval(l, r)
+        B2_abs = abs_z2_minus1_max_interval(l, r) * B_max
+        m2 = A2_abs * B_max + 2.0 * A1_abs * B1_abs + A_max * B2_abs
+        rem = m2 * (width ** 3) / 24.0
+        lo_total = down(lo_total + width * f_lo - rem)
+        hi_total = up(hi_total + width * f_hi + rem)
     if lo_total < 0.0:
         lo_total = 0.0
-    return lo_total, hi_total
-
-
-
-def cost_integrand_upper(mid: float, a_par: float, b_par: float) -> float:
-    py = phi_pdf_float(mid)
-    _, Phi_mid_hi = Phi_bounds_float(mid)
-    A_hi = 0.1 + 9.9 * Phi_mid_hi
-
-    ua = (a_par - RHO_F * mid) / SIGMA_F
-    if math.isinf(b_par):
-        D_hi = 1.0 - Phi_bounds_float(ua)[0]
-    else:
-        ub = (b_par - RHO_F * mid) / SIGMA_F
-        D_hi = Phi_bounds_float(ub)[1] - Phi_bounds_float(ua)[0]
-        if D_hi < 0.0:
-            D_hi = 0.0
-        elif D_hi > 1.0:
-            D_hi = 1.0
-
-    return A_hi * py * D_hi
-
-
-
-def cost_cell_second_derivative_bound(l: float, r: float, a_par: float, b_par: float) -> float:
-    phi_y_max = phi_max_interval_float(l, r)
-    y_abs_max = max(abs(l), abs(r))
-    y2m1_max = abs_z2_minus1_max_interval_float(l, r)
-
-    _, Phi_r_hi = Phi_bounds_float(r)
-    A_max = 0.1 + 9.9 * Phi_r_hi
-    A_prime_abs = 9.9 * phi_y_max
-    A_second_abs = 9.9 * abs_z_phi_max_interval_float(l, r)
-
-    ua_low = (a_par - RHO_F * r) / SIGMA_F
-    ua_high = (a_par - RHO_F * l) / SIGMA_F
-
-    if math.isinf(b_par):
-        D_max = 1.0 - Phi_bounds_float(ua_low)[0]
-        Dprime_abs = BETA_F * phi_max_interval_float(ua_low, ua_high)
-        Dsecond_abs = (BETA_F * BETA_F) * abs_z_phi_max_interval_float(ua_low, ua_high)
-    else:
-        ub_low = (b_par - RHO_F * r) / SIGMA_F
-        ub_high = (b_par - RHO_F * l) / SIGMA_F
-        u_low = ua_low
-        u_high = ub_high
-        width_u = (b_par - a_par) / SIGMA_F
-        phi_u_max = phi_max_interval_float(u_low, u_high)
-        absu_phi_max = abs_z_phi_max_interval_float(u_low, u_high)
-
-        D_max = min(1.0, width_u * phi_u_max)
-        Dprime_abs = BETA_F * width_u * absu_phi_max
-        Dsecond_abs = (BETA_F * BETA_F) * 2.0 * absu_phi_max
-
-    B_max = A_max * D_max
-    B_prime_abs = A_prime_abs * D_max + A_max * Dprime_abs
-    B_second_abs = (
-        A_second_abs * D_max
-        + 2.0 * A_prime_abs * Dprime_abs
-        + A_max * Dsecond_abs
-    )
-
-    return phi_y_max * (
-        B_second_abs + 2.0 * y_abs_max * B_prime_abs + y2m1_max * B_max
-    )
-
-
-
-def midpoint_cost_upper(left: float, right: float, a_par: float, b_par: float, *, n: int) -> float:
-    if right <= left:
-        return 0.0
-
-    w = (right - left) / float(n)
-    total = 0.0
-
-    for i in range(n):
-        l = left + w * i
-        r = l + w
-        mid = 0.5 * (l + r)
-
-        g_hi = cost_integrand_upper(mid, a_par, b_par)
-        m2 = cost_cell_second_derivative_bound(l, r, a_par, b_par)
-        rem = m2 * (w ** 3) / 24.0
-
-        total += w * g_hi + rem
-
-    return total
-
-
-
-def cost_upper_finite_x(x_upper: float, a_par: float, b_par: float, *, n: int) -> float:
-    total = midpoint_cost_upper(T_MIN_F, x_upper, a_par, b_par, n=n)
-    tail_lo = 10.0 * Phi_bounds_float(T_MIN_F)[1]
-    return total + tail_lo
-
-
-
-def cost_upper_infinite_x(a_par: float, *, n: int) -> float:
-    total = midpoint_cost_upper(T_MIN_F, T_MAX_F, a_par, math.inf, n=n)
-    tail_lo = 10.0 * Phi_bounds_float(T_MIN_F)[1]
-    tail_hi = 10.0 * (1.0 - Phi_bounds_float(T_MAX_F)[0])
-    return total + tail_lo + tail_hi
-
-
-
-def bracket_quantile_float(target_p: float, center: float, *, step: float) -> Tuple[float, float]:
-    x_lo = float(center)
-    while True:
-        _, hi = Phi_bounds_float(x_lo)
-        if hi <= target_p:
-            break
-        x_lo -= step
-
-    x_hi = float(center)
-    while True:
-        lo, _ = Phi_bounds_float(x_hi)
-        if lo >= target_p:
-            break
-        x_hi += step
-
-    return x_lo, x_hi
-
-
-
-def bracket_band_cutoff(center: float, x_lo: float, x_hi: float, c_prev_lo: float, c_prev_hi: float) -> Tuple[float, float]:
-    c_lo = float(center)
-    while True:
-        lo_val, _ = midpoint_mass_bounds_cost(c_lo, c_prev_lo, x_lo, x_lo)
-        if lo_val >= DELTA_F:
-            break
-        c_lo -= C_STEP_F
-
-    c_hi = float(center)
-    while True:
-        _, hi_val = midpoint_mass_bounds_cost(c_hi, c_prev_hi, x_hi, x_hi)
-        if hi_val <= DELTA_F:
-            break
-        c_hi += C_STEP_F
-
-    return c_lo, c_hi
-
-
-
-def bracket_continuation_cutoff(center: float, x_lo: float, x_hi: float, c_last_lo: float, c_last_hi: float) -> Tuple[float, float]:
-    d_lo = float(center)
-    while True:
-        lo_val, _ = midpoint_mass_bounds_cost(d_lo, c_last_lo, x_lo, x_lo)
-        if lo_val >= V_LOW_F:
-            break
-        d_lo -= D_STEP_F
-
-    d_hi = float(center)
-    while True:
-        _, hi_val = midpoint_mass_bounds_cost(d_hi, c_last_hi, x_hi, x_hi)
-        if hi_val <= V_LOW_F:
-            break
-        d_hi += D_STEP_F
-
-    return d_lo, d_hi
-
-
-
-def run_cost_certificate() -> Tuple[CostCertificateResult, List[CostBandCertificateRow], str]:
-    nominal_c_up = math.fsum(r.cost for r in rows)
-    c_last_nominal = float(rows[-1].c_j)
-    x_cont_nominal = float(mod.x_frontier(mod.PHI))
-    d_cont_nominal = float(mod.continuation_cutoff(V_LOW_F, c_last_nominal, x_cont_nominal))
-    nominal_cont_cost = float(mod.continuation_cost(V_LOW_F, c_last_nominal, x_cont_nominal))
-
-    x_brackets: Dict[int | str, Tuple[float, float]] = {1: (math.inf, math.inf)}
-    for j, r in enumerate(rows, start=1):
-        if j == 1:
-            continue
-        target_p = math.sqrt(1.0 - 2.0 * float(r.s_prev))
-        x_brackets[j] = bracket_quantile_float(target_p, float(r.x_high), step=X_STEP_F)
-
-    x_brackets["cont"] = bracket_quantile_float(
-        math.sqrt(1.0 - 2.0 * PHI_F),
-        x_cont_nominal,
-        step=X_STEP_F,
-    )
-
-    c_brackets: Dict[int, Tuple[float, float]] = {}
-    c1_center = float(rows[0].c_j)
-    c_brackets[1] = bracket_quantile_float(1.0 - DELTA_F, c1_center, step=1.0e-6)
-
-    for j in range(2, len(rows) + 1):
-        x_lo, x_hi = x_brackets[j]
-        c_prev_lo, c_prev_hi = c_brackets[j - 1]
-        c_brackets[j] = bracket_band_cutoff(float(rows[j - 1].c_j), x_lo, x_hi, c_prev_lo, c_prev_hi)
-
-    d_lo, d_hi = bracket_continuation_cutoff(
-        d_cont_nominal,
-        x_brackets["cont"][0],
-        x_brackets["cont"][1],
-        c_brackets[len(rows)][0],
-        c_brackets[len(rows)][1],
-    )
-
-    table_rows: List[CostBandCertificateRow] = []
-    cost_uppers: List[float] = []
-
-    for j, r in enumerate(rows, start=1):
-        if j == 1:
-            cost_upper = cost_upper_infinite_x(c_brackets[1][0], n=COST_N_BAND1_F)
-            x_lo = math.inf
-            x_hi = math.inf
-            c_prev_lo = math.inf
-            c_prev_hi = math.inf
-        else:
-            x_lo, x_hi = x_brackets[j]
-            c_prev_lo, c_prev_hi = c_brackets[j - 1]
-            cost_upper = cost_upper_finite_x(x_hi, c_brackets[j][0], c_prev_hi, n=COST_N_BANDS_F)
-
-        cost_uppers.append(cost_upper)
-        table_rows.append(
-            CostBandCertificateRow(
-                j=j,
-                x_lo=x_lo,
-                x_hi=x_hi,
-                c_prev_lo=c_prev_lo,
-                c_prev_hi=c_prev_hi,
-                c_lo=c_brackets[j][0],
-                c_hi=c_brackets[j][1],
-                nominal_cost=float(r.cost),
-                cost_upper=cost_upper,
-                cost_gap=cost_upper - float(r.cost),
-            )
-        )
-
-    c_up_upper = math.fsum(cost_uppers)
-    continuation_cost_upper = cost_upper_finite_x(
-        x_brackets["cont"][1],
-        d_lo,
-        c_brackets[len(rows)][1],
-        n=COST_N_CONT_F,
-    )
-    total_upper = c_up_upper + continuation_cost_upper
-    slack_lower = TOTAL_BUDGET_F - total_upper
-
-    band_lo_margins: List[float] = []
-    band_hi_margins: List[float] = []
-
-    lo_tail_mass = 1.0 - Phi_bounds_float(c_brackets[1][0])[1]
-    hi_tail_mass = 1.0 - Phi_bounds_float(c_brackets[1][1])[0]
-    band_lo_margins.append(lo_tail_mass - DELTA_F)
-    band_hi_margins.append(DELTA_F - hi_tail_mass)
-
-    for j in range(2, len(rows) + 1):
-        x_lo, x_hi = x_brackets[j]
-        c_prev_lo, c_prev_hi = c_brackets[j - 1]
-        c_lo, c_hi = c_brackets[j]
-        lo_val, _ = midpoint_mass_bounds_cost(c_lo, c_prev_lo, x_lo, x_lo)
-        _, hi_val = midpoint_mass_bounds_cost(c_hi, c_prev_hi, x_hi, x_hi)
-        band_lo_margins.append(lo_val - DELTA_F)
-        band_hi_margins.append(DELTA_F - hi_val)
-
-    cont_lo_val, _ = midpoint_mass_bounds_cost(d_lo, c_brackets[len(rows)][0], x_brackets["cont"][0], x_brackets["cont"][0])
-    _, cont_hi_val = midpoint_mass_bounds_cost(d_hi, c_brackets[len(rows)][1], x_brackets["cont"][1], x_brackets["cont"][1])
-
-    worst_gap = max(table_rows, key=lambda row: row.cost_gap)
-
-    result = CostCertificateResult(
-        nominal_c_up=nominal_c_up,
-        nominal_c_last=c_last_nominal,
-        nominal_x_cont=x_cont_nominal,
-        nominal_d_cont=d_cont_nominal,
-        nominal_cont_cost=nominal_cont_cost,
-        max_cutoff_width=max(c_hi - c_lo for c_lo, c_hi in c_brackets.values()),
-        c_last_lo=c_brackets[len(rows)][0],
-        c_last_hi=c_brackets[len(rows)][1],
-        d_lo=d_lo,
-        d_hi=d_hi,
-        min_band_lower_margin=min(band_lo_margins),
-        min_band_upper_margin=min(band_hi_margins),
-        cont_lower_margin=cont_lo_val - V_LOW_F,
-        cont_upper_margin=V_LOW_F - cont_hi_val,
-        c_up_upper=c_up_upper,
-        c_up_gap=c_up_upper - nominal_c_up,
-        continuation_cost_upper=continuation_cost_upper,
-        continuation_gap=continuation_cost_upper - nominal_cont_cost,
-        total_upper=total_upper,
-        total_budget=TOTAL_BUDGET_F,
-        slack_lower=slack_lower,
-        worst_band_index=worst_gap.j,
-        worst_band_gap=worst_gap.cost_gap,
-        status="PASS" if total_upper < TOTAL_BUDGET_F else "FAIL",
-    )
-
-    lines: List[str] = []
-    lines.append("=" * 72)
-    lines.append("COST-SIDE CERTIFICATE")
-    lines.append("=" * 72)
-    lines.append(f"phi                             = {PHI_F:.12f}")
-    lines.append(f"delta                           = {DELTA_F:.12f}")
-    lines.append(f"v_low                           = {V_LOW_F:.12f}")
-    lines.append(f"rho                             = {RHO_F:.12f}")
-    lines.append(f"sigma                           = {SIGMA_F:.15f}")
-    lines.append("")
-    lines.append("Nominal floating centers")
-    lines.append(f"  nominal c_up                  = {nominal_c_up:.15f}")
-    lines.append(f"  nominal c_J                   = {c_last_nominal:.15f}")
-    lines.append(f"  nominal x_cont                = {x_cont_nominal:.15f}")
-    lines.append(f"  nominal d_cont(v_low)         = {d_cont_nominal:.15f}")
-    lines.append(f"  nominal continuation cost     = {nominal_cont_cost:.15f}")
-    lines.append("")
-    lines.append("Certified cutoff brackets")
-    lines.append(f"  max band cutoff width         = {result.max_cutoff_width:.15e}")
-    lines.append(f"  final cutoff c_J_lo           = {result.c_last_lo:.15f}")
-    lines.append(f"  final cutoff c_J_hi           = {result.c_last_hi:.15f}")
-    lines.append(f"  continuation d_lo             = {result.d_lo:.15f}")
-    lines.append(f"  continuation d_hi             = {result.d_hi:.15f}")
-    lines.append("")
-    lines.append("Mass checks")
-    lines.append(f"  min band lower margin         = {result.min_band_lower_margin:.15e}")
-    lines.append(f"  min band upper margin         = {result.min_band_upper_margin:.15e}")
-    lines.append(f"  cont mass_lo(d_lo) - v_low    = {result.cont_lower_margin:.15e}")
-    lines.append(f"  v_low - cont mass_hi(d_hi)    = {result.cont_upper_margin:.15e}")
-    lines.append("")
-    lines.append("Cost bounds")
-    lines.append(f"  c_up upper                    = {result.c_up_upper:.15f}")
-    lines.append(f"  c_up over nominal             = {result.c_up_gap:.15f}")
-    lines.append(f"  continuation cost upper       = {result.continuation_cost_upper:.15f}")
-    lines.append(f"  cont cost over nominal        = {result.continuation_gap:.15f}")
-    lines.append(f"  total spend upper             = {result.total_upper:.15f}")
-    lines.append(f"  total budget                  = {TOTAL_BUDGET_F:.15f}")
-    lines.append(f"  certified slack               = {result.slack_lower:.15f}")
-    lines.append("")
-    lines.append("Band-level diagnostics")
-    lines.append(f"  worst band gap index          = {result.worst_band_index}")
-    lines.append(f"  worst band gap                = {result.worst_band_gap:.15f}")
-    lines.append(f"  band 1 upper                  = {table_rows[0].cost_upper:.15f}")
-    lines.append(f"  band 50 upper                 = {table_rows[-1].cost_upper:.15f}")
-    lines.append("")
-    lines.append(
-        "STATUS: cost-side certificate PASSES."
-        if result.status == "PASS"
-        else "STATUS: cost-side certificate DOES NOT PASS."
-    )
-
-    return result, table_rows, "\n".join(lines) + "\n"
-
-
-# =============================================================================
-# Combined report / writers.
-# =============================================================================
+    # Lower tail below GA_T_MIN.  Upper bound uses Phi(z)<=1.
+    _, tail_hi = Phi_bounds_float(GA_T_MIN)
+    hi_total = up(hi_total + tail_hi)
+    return lo_total, min(1.0, hi_total)
+
+
+@lru_cache(maxsize=200_000)
+def ga_point_bounds_cached(x_key: float, c_key: float) -> Tuple[float, float]:
+    # Keys are already rounded endpoint floats; use them directly.
+    x = float(x_key)
+    c = float(c_key)
+    num_lo, num_hi = ga_numerator_point_bounds(x, c)
+    a = (x - rho * c) / sigma
+    den_lo, den_hi = Phi_bounds_float(a)
+    if den_lo <= 0.0 or den_hi <= 0.0:
+        raise RuntimeError("Nonpositive denominator in G_A")
+    ratio_lo = max(0.0, down(num_lo / den_hi))
+    ratio_hi = min(1.0, up(num_hi / den_lo))
+    return down(ell + d * ratio_lo), up(ell + d * ratio_hi)
+
+
+def GA_box(uL: float, uU: float, vL: float, vU: float) -> Tuple[float, float]:
+    """Interval for G_A(u,v)=E[A | Y=q(v), X<=q(u)].
+
+    The conditional normal family is monotone in both the truncation point x
+    and the conditional mean rho*c, so the lower corner is (xL,cL) and the
+    upper corner is (xU,cU), where x=q(u), c=q(v).
+    """
+    xL, xU = q_interval_from_tail(uL, uU)
+    cL, cU = q_interval_from_tail(vL, vU)
+    lo, _ = ga_point_bounds_cached(xL, cL)
+    _, hi = ga_point_bounds_cached(xU, cU)
+    return lo, hi
+
+
+def value_box(vL: float, vU: float) -> Tuple[float, float]:
+    # e(q(v)) = 10 - 9.9 v, decreasing in v.
+    return down(nu - d * vU), up(nu - d * vL)
 
 
 @dataclass
-class CombinedCertificateSummary:
+class Box:
+    uL: float
+    uU: float
+    vL: float
+    vU: float
+    bFL: float
+    bFU: float
+    bGL: float
+    bGU: float
+    cGL: float
+    cGU: float
+    voutL: float
+    voutU: float
+
+
+@dataclass
+class DriftBox:
+    duL: float
+    duU: float
+    dvL: float
+    dvU: float
+    dbFL: float
+    dbFU: float
+    dbGL: float
+    dbGU: float
+    dcGL: float
+    dcGU: float
+    valL: float
+    valU: float
+
+
+@dataclass
+class CertificateSummary:
     status: str
-    source_script: str
-    phi: str
-    v_low: str
-    threshold: str
-    total_budget: str
-    value_status: str
-    cost_status: str
-    value_total_margin: str
-    value_increment_margin: str
-    cost_slack: str
-    note: str
+    rho: float
+    sigma: float
+    step_size: float
+    s0: float
+    kappa_low: float
+    theta_03: float
+    total_steps: int
+    active_certain_steps: int
+    uncertain_steps: int
+    post_steps: int
+    max_picard_iterations: int
+    tau_upper_time: Optional[float]
+    final_u: Tuple[float, float]
+    final_v: Tuple[float, float]
+    final_bF: Tuple[float, float]
+    final_bG: Tuple[float, float]
+    green_cost_interval: Tuple[float, float]
+    outside_value_interval: Tuple[float, float]
+    cost_slack_lower: float
+    value_margin_lower: float
 
 
-
-def write_band_csv(path: Path, table_rows: Iterable[CostBandCertificateRow]) -> None:
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "j",
-            "x_lo",
-            "x_hi",
-            "c_prev_lo",
-            "c_prev_hi",
-            "c_lo",
-            "c_hi",
-            "nominal_cost",
-            "cost_upper",
-            "cost_gap",
-        ])
-        for row in table_rows:
-            writer.writerow([
-                row.j,
-                "inf" if math.isinf(row.x_lo) else f"{row.x_lo:.15f}",
-                "inf" if math.isinf(row.x_hi) else f"{row.x_hi:.15f}",
-                "inf" if math.isinf(row.c_prev_lo) else f"{row.c_prev_lo:.15f}",
-                "inf" if math.isinf(row.c_prev_hi) else f"{row.c_prev_hi:.15f}",
-                f"{row.c_lo:.15f}",
-                f"{row.c_hi:.15f}",
-                f"{row.nominal_cost:.15f}",
-                f"{row.cost_upper:.15f}",
-                f"{row.cost_gap:.15f}",
-            ])
-
-
-
-def write_json(path: Path, summary: CombinedCertificateSummary, value_result: ValueCertificateResult, cost_result: CostCertificateResult) -> None:
-    payload = {
-        "summary": asdict(summary),
-        "value": asdict(value_result),
-        "cost": asdict(cost_result),
-    }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-
-
-def build_combined_report(value_result: ValueCertificateResult, value_report: str, cost_result: CostCertificateResult, cost_report: str) -> Tuple[CombinedCertificateSummary, str]:
-    value_margin = D(value_result.total_margin)
-    increment_margin = D(value_result.increment_margin)
-
-    final_status = "PASS" if value_result.status == "PASS" and cost_result.status == "PASS" else "FAIL"
-    summary = CombinedCertificateSummary(
-        status=final_status,
-        source_script=str(SRC.name),
-        phi=str(PHI_D),
-        v_low=str(V_LOW_D),
-        threshold=str(THRESHOLD_D),
-        total_budget=f"{TOTAL_BUDGET_F:.15f}",
-        value_status=value_result.status,
-        cost_status=cost_result.status,
-        value_total_margin=str(value_margin),
-        value_increment_margin=str(increment_margin),
-        cost_slack=f"{cost_result.slack_lower:.15f}",
-        note=(
-            "This production script certifies the two inequalities in the revised "
-            "dual-host corollary while treating V_FA_low and the threshold as frozen "
-            "supporting inputs."
-        ),
-    )
-
-    lines: List[str] = []
-    lines.append("=" * 72)
-    lines.append("rho = 0.3 PRODUCTION CERTIFICATE")
-    lines.append("=" * 72)
-    lines.append(f"source centers               = {SRC.name}")
-    lines.append(f"phi                          = {PHI_D}")
-    lines.append(f"v_low                        = {V_LOW_D}")
-    lines.append(f"value host                   = A <= Q_A(1-phi)")
-    lines.append(f"cost host                    = A <= Q_A(sqrt(1-2phi))")
-    lines.append(f"threshold                    = {THRESHOLD_D}")
-    lines.append(f"total budget                 = {TOTAL_BUDGET_F:.15f}")
-    lines.append("")
-    lines.append("Final theorem-object verdict")
-    lines.append(f"  value side status          = {value_result.status}")
-    lines.append(f"  cost side status           = {cost_result.status}")
-    lines.append(f"  value total margin         = {value_margin}")
-    lines.append(f"  value increment margin     = {increment_margin}")
-    lines.append(f"  cost slack                 = {cost_result.slack_lower:.15f}")
-    lines.append("")
-    if final_status == "PASS":
-        lines.append("STATUS: BOTH CERTIFICATE INEQUALITIES PASS.")
-        lines.append(
-            "Within the frozen appendix object, the revised rho = 0.3 corollary "
-            "is numerically certified at v_low = 0.325."
-        )
+def drift_on_tube(tube: Box, phase: str) -> DriftBox:
+    if phase == "active":
+        duL, duU = F1_box(tube.uL, tube.uU, tube.vL, tube.vU)
+        dbFL = down(-nu + d * tube.uL)
+        dbFU = up(-nu + d * tube.uU)
+    elif phase == "uncertain":
+        _, duU = F1_box(tube.uL, tube.uU, tube.vL, tube.vU)
+        duL = 0.0
+        dbFL = min(down(-nu + d * tube.uL), 0.0)
+        dbFU = up(-nu + d * tube.uU)
+    elif phase == "post":
+        duL = duU = 0.0
+        dbFL = dbFU = 0.0
     else:
-        lines.append("STATUS: THE COMBINED CERTIFICATE DOES NOT PASS.")
-    lines.append("")
-    lines.append(
-        "CAVEAT: This script does not yet independently certify the supporting "
-        "constants V_FA_low = 1.360955 and threshold = 2.36411805. It treats them "
-        "as frozen corollary inputs."
+        raise ValueError(f"unknown phase {phase}")
+
+    dvL, dvU = F2_box(tube.uL, tube.uU, tube.vL, tube.vU)
+    gaL, gaU = GA_box(tube.uL, tube.uU, tube.vL, tube.vU)
+    valL, valU = value_box(tube.vL, tube.vU)
+    return DriftBox(
+        duL=duL,
+        duU=duU,
+        dvL=dvL,
+        dvU=dvU,
+        dbFL=dbFL,
+        dbFU=dbFU,
+        dbGL=down(-gaU),
+        dbGU=up(-gaL),
+        dcGL=gaL,
+        dcGU=gaU,
+        valL=valL,
+        valU=valU,
     )
-    lines.append("")
-    lines.append(value_report.rstrip())
-    lines.append("")
-    lines.append(cost_report.rstrip())
-    lines.append("")
-    return summary, "\n".join(lines) + "\n"
 
 
+def tube_candidate(B: Box, drift: DriftBox, dt: float, value_overlap: float) -> Box:
+    return Box(
+        uL=B.uL,
+        uU=up(B.uU + dt * drift.duU),
+        vL=B.vL,
+        vU=up(B.vU + dt * drift.dvU),
+        bFL=down(B.bFL + dt * drift.dbFL),
+        bFU=B.bFU,
+        bGL=down(B.bGL + dt * drift.dbGL),
+        bGU=B.bGU,
+        cGL=B.cGL,
+        cGU=up(B.cGU + dt * drift.dcGU),
+        voutL=B.voutL,
+        voutU=up(B.voutU + value_overlap * drift.valU),
+    )
 
-def main() -> None:
-    value_result, value_report = run_value_certificate()
-    cost_result, table_rows, cost_report = run_cost_certificate()
-    summary, report = build_combined_report(value_result, value_report, cost_result, cost_report)
 
-    print(report, end="")
-
-    out_txt = Path(__file__).with_suffix(".txt")
-    out_csv = Path(__file__).with_suffix(".csv")
-    out_json = Path(__file__).with_suffix(".json")
-
-    out_txt.write_text(report, encoding="utf-8")
-    write_band_csv(out_csv, table_rows)
-    write_json(out_json, summary, value_result, cost_result)
+def contains(T: Box, C: Box) -> bool:
+    return (
+        T.uL <= C.uL and C.uU <= T.uU and
+        T.vL <= C.vL and C.vU <= T.vU and
+        T.bFL <= C.bFL and C.bFU <= T.bFU and
+        T.bGL <= C.bGL and C.bGU <= T.bGU and
+        T.cGL <= C.cGL and C.cGU <= T.cGU and
+        T.voutL <= C.voutL and C.voutU <= T.voutU
+    )
 
 
-if __name__ == "__main__":
-    main()
+def initial_tube_guess(B: Box, dt: float, phase: str, value_overlap: float) -> Box:
+    # A deliberately generous first tube; Picard iteration tightens by verified
+    # inclusion, not by trusting these constants.
+    fmax = 8.0
+    return Box(
+        uL=B.uL,
+        uU=up(B.uU + PICARD_INFLATION * dt * fmax),
+        vL=B.vL,
+        vU=up(B.vU + PICARD_INFLATION * dt * fmax),
+        bFL=down(B.bFL - PICARD_INFLATION * dt * nu),
+        bFU=B.bFU,
+        bGL=down(B.bGL - PICARD_INFLATION * dt * nu),
+        bGU=B.bGU,
+        cGL=B.cGL,
+        cGU=up(B.cGU + PICARD_INFLATION * dt * nu),
+        voutL=B.voutL,
+        voutU=up(B.voutU + PICARD_INFLATION * value_overlap * nu),
+    )
+
+
+def hull(A: Box, B: Box) -> Box:
+    return Box(
+        uL=min(A.uL, B.uL), uU=max(A.uU, B.uU),
+        vL=min(A.vL, B.vL), vU=max(A.vU, B.vU),
+        bFL=min(A.bFL, B.bFL), bFU=max(A.bFU, B.bFU),
+        bGL=min(A.bGL, B.bGL), bGU=max(A.bGU, B.bGU),
+        cGL=min(A.cGL, B.cGL), cGU=max(A.cGU, B.cGU),
+        voutL=min(A.voutL, B.voutL), voutU=max(A.voutU, B.voutU),
+    )
+
+
+def picard_step(B: Box, dt: float, phase: str, value_overlap: float) -> Tuple[Box, DriftBox, int]:
+    T = initial_tube_guess(B, dt, phase, value_overlap)
+    last_drift = None
+    for it in range(1, PICARD_MAX_ITER + 1):
+        drift = drift_on_tube(T, phase)
+        cand = tube_candidate(B, drift, dt, value_overlap)
+        if contains(T, cand):
+            # Endpoint enclosure, not the whole tube.
+            Bnext = Box(
+                uL=down(B.uL + dt * drift.duL),
+                uU=up(B.uU + dt * drift.duU),
+                vL=down(B.vL + dt * drift.dvL),
+                vU=up(B.vU + dt * drift.dvU),
+                bFL=down(B.bFL + dt * drift.dbFL),
+                bFU=up(B.bFU + dt * drift.dbFU),
+                bGL=down(B.bGL + dt * drift.dbGL),
+                bGU=up(B.bGU + dt * drift.dbGU),
+                cGL=down(B.cGL + dt * drift.dcGL),
+                cGU=up(B.cGU + dt * drift.dcGU),
+                voutL=down(B.voutL + value_overlap * drift.valL),
+                voutU=up(B.voutU + value_overlap * drift.valU),
+            )
+            return Bnext, drift, it
+        T = hull(T, cand)
+        last_drift = drift
+    raise RuntimeError(f"Picard tube inclusion failed after {PICARD_MAX_ITER} iterations in phase={phase}")
+
+
+# ----------------------------------------------------------------------
+# Initial diagonal bootstrap on [0,s0]
+# ----------------------------------------------------------------------
+U_trial = 2.0 * s0
+_, Fdiag_hi = F1_interval_point(U_trial, U_trial)
+bootstrap_upper = up(s0 * Fdiag_hi)
+if bootstrap_upper > U_trial:
+    raise RuntimeError("Initial diagonal bootstrap failed")
+
+uL0 = down(s0)
+uU0 = bootstrap_upper
+vL0 = down(s0)
+vU0 = bootstrap_upper
+# Conservative initialization over [0,s0].
+bF_L0 = down(budget - nu * s0)
+bF_U0 = up(budget + s0 * (-nu + d * uU0))
+bG_L0 = down(budget - nu * s0)
+bG_U0 = up(budget - ell * s0)
+cG_L0 = down(ell * s0)
+cG_U0 = up(nu * s0)
+vout_L0 = 0.0
+vout_U0 = 0.0
+
+B = Box(
+    uL=uL0, uU=uU0, vL=vL0, vU=vU0,
+    bFL=bF_L0, bFU=bF_U0,
+    bGL=bG_L0, bGU=bG_U0,
+    cGL=cG_L0, cGU=cG_U0,
+    voutL=vout_L0, voutU=vout_U0,
+)
+
+# ----------------------------------------------------------------------
+# Picard-enclosed hybrid evolution
+# ----------------------------------------------------------------------
+s = s0
+phase = "active"
+tau_upper_time: Optional[float] = None
+steps = active_steps = uncertain_steps = post_steps = 0
+max_iters = 0
+
+while s < kappa_low - 1e-15:
+    dt = min(h, kappa_low - s)
+    value_overlap = 0.0
+    if s + dt > m:
+        value_overlap = dt if s >= m else (s + dt - m)
+
+    steps += 1
+    if phase == "active":
+        active_steps += 1
+    elif phase == "uncertain":
+        uncertain_steps += 1
+    else:
+        post_steps += 1
+
+    old = B
+    Bnext, drift, iters = picard_step(B, dt, phase, value_overlap)
+    max_iters = max(max_iters, iters)
+
+    if phase == "active" and Bnext.bFL <= 0.0:
+        # Some admissible path may have exhausted inside this step.  Keep a
+        # hybrid enclosure: u may have frozen as early as the pre-step lower
+        # endpoint, while its upper endpoint may have followed the active drift.
+        Bnext.uL = old.uL
+        Bnext.vL = old.vL
+        phase = "uncertain"
+
+    if phase in {"active", "uncertain"} and Bnext.bFU <= 0.0:
+        # All admissible paths are exhausted by the end of this step.  From the
+        # next step onward u is frozen in its current interval.
+        if tau_upper_time is None:
+            tau_upper_time = s + dt
+        phase = "post"
+
+    B = Bnext
+    s = up(s + dt)
+
+status = "PASS" if (B.cGU < budget and B.voutL > theta_03 and tau_upper_time is not None) else "FAIL"
+summary = CertificateSummary(
+    status=status,
+    rho=rho,
+    sigma=sigma,
+    step_size=h,
+    s0=s0,
+    kappa_low=kappa_low,
+    theta_03=theta_03,
+    total_steps=steps,
+    active_certain_steps=active_steps,
+    uncertain_steps=uncertain_steps,
+    post_steps=post_steps,
+    max_picard_iterations=max_iters,
+    tau_upper_time=tau_upper_time,
+    final_u=(B.uL, B.uU),
+    final_v=(B.vL, B.vU),
+    final_bF=(B.bFL, B.bFU),
+    final_bG=(B.bGL, B.bGU),
+    green_cost_interval=(B.cGL, B.cGU),
+    outside_value_interval=(B.voutL, B.voutU),
+    cost_slack_lower=budget - B.cGU,
+    value_margin_lower=B.voutL - theta_03,
+)
+
+lines = []
+lines.append("=" * 72)
+lines.append(f"rho = 0.3 PICARD STEP-TUBE {REPORT_KIND} CERTIFICATE")
+lines.append("=" * 72)
+lines.append(f"rho                         = {rho}")
+lines.append(f"sigma                       = {sigma:.15f}")
+lines.append(f"m                           = {m}")
+lines.append(f"kappa_low                   = {kappa_low}")
+lines.append(f"threshold Theta_0.3         = {theta_03:.12f}")
+lines.append(f"budget                      = {budget:.15f}")
+lines.append("")
+lines.append("Validated infrastructure")
+lines.append(f"  A-S uniform Phi error     = {PHI_APPROX_ERR}")
+lines.append(f"  outward round pad         = {ROUND_PAD}")
+lines.append(f"  G_A quadrature cells      = {GA_N}")
+lines.append("")
+lines.append("Initial diagonal bootstrap")
+lines.append(f"  s0                        = {s0}")
+lines.append(f"  U_trial                   = {U_trial}")
+lines.append(f"  F_diag upper at U_trial   = {Fdiag_hi:.15f}")
+lines.append(f"  certified u(s0), v(s0) in = [{uL0:.15e}, {uU0:.15e}]")
+lines.append(f"  initial bF enclosure      = [{bF_L0:.15f}, {bF_U0:.15f}]")
+lines.append(f"  initial bG enclosure      = [{bG_L0:.15f}, {bG_U0:.15f}]")
+lines.append("")
+lines.append("Picard step-tube settings")
+lines.append(f"  step size h               = {h}")
+lines.append(f"  total steps               = {steps}")
+lines.append(f"  active-certain steps      = {active_steps}")
+lines.append(f"  farmer-uncertain steps    = {uncertain_steps}")
+lines.append(f"  post-Farmer steps         = {post_steps}")
+lines.append(f"  max Picard iterations     = {max_iters}")
+lines.append("")
+if tau_upper_time is None:
+    lines.append("Farmer budget did not certify exhaustion before kappa_low.")
+else:
+    lines.append(f"Certified upper Farmer-exhaustion time tau <= {tau_upper_time:.9f}")
+lines.append(f"Final u interval            = [{B.uL:.15f}, {B.uU:.15f}]")
+lines.append(f"Final v interval            = [{B.vL:.15f}, {B.vU:.15f}]")
+lines.append("")
+lines.append("Validated accumulators")
+lines.append(f"  Green cost C_G interval   = [{B.cGL:.12f}, {B.cGU:.12f}]")
+lines.append(f"  cost slack lower          = {summary.cost_slack_lower:.12f}")
+lines.append(f"  V_out[m,kappa] interval   = [{B.voutL:.12f}, {B.voutU:.12f}]")
+lines.append(f"  value margin lower        = {summary.value_margin_lower:.12f}")
+lines.append("")
+lines.append(f"STATUS: RHO03 PICARD {REPORT_KIND} CERTIFICATE {status}.")
+lines.append("This script verifies B_n + [0,h]F(T_n) subset T_n at every step and")
+lines.append("evaluates drift, cost, and value integrands on the verified step tube.")
+report = "\n".join(lines) + "\n"
+print(report, end="")
+
+root = SCRIPT_PATH.parent
+(root / f"{OUTPUT_STEM}.txt").write_text(report, encoding="utf-8")
+(root / f"{OUTPUT_STEM}.json").write_text(
+    json.dumps(asdict(summary), indent=2, sort_keys=True), encoding="utf-8"
+)

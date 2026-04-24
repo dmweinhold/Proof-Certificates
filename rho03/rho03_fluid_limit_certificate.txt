@@ -1,37 +1,44 @@
 ========================================================================
-rho = 0.3 GLOBAL FLUID-LIMIT HARDENED CERTIFICATE
+rho = 0.3 PICARD STEP-TUBE FLUID CERTIFICATE
 ========================================================================
 rho                         = 0.3
 sigma                       = 0.953939201416946
 m                           = 0.1
 kappa_low                   = 0.620816
-threshold Theta_0.3         = 2.364118044500
-budget                      = 2.525
+threshold Theta_0.3         = 2.364130000000
+budget                      = 2.525000000000000
 
-Validated Phi / invPhi infrastructure
+Validated infrastructure
   A-S uniform Phi error     = 7.5e-08
   outward round pad         = 1e-12
+  G_A quadrature cells      = 96
 
-Initial small-time diagonal bootstrap
+Initial diagonal bootstrap
   s0                        = 1e-05
   U_trial                   = 2e-05
   F_diag upper at U_trial   = 1.001295870132168
   certified u(s0), v(s0) in = [9.999999999999999e-06, 1.001295870132168e-05]
-  certified v(s0) enclosure = [9.999999999999999e-06, 1.001295870132168e-05]
   initial bF enclosure      = [2.524899999999999, 2.524900000991283]
+  initial bG enclosure      = [2.524899999999999, 2.524999000000000]
 
-Interval-Euler settings
+Picard step-tube settings
   step size h               = 0.0001
   total steps               = 6209
-  active-phase steps        = 3129
-  post-Farmer steps         = 3080
+  active-certain steps      = 3127
+  farmer-uncertain steps    = 10
+  post-Farmer steps         = 3072
+  max Picard iterations     = 1
 
-Certified upper Farmer-exhaustion time tau <= 0.312910000
-Frozen u interval after tau = [0.427875801444050, 0.428057191666763]
+Certified upper Farmer-exhaustion time tau <= 0.313710000
+Final u interval            = [0.426936619958318, 0.430911323748036]
+Final v interval            = [0.911709483104384, 0.919444313466519]
 
-Value-side lower bound
-  lower bound on V_out[m,kappa_low] = 2.578637909920
-  margin over Theta_0.3            = 0.214519865420
+Validated accumulators
+  Green cost C_G interval   = [2.353234170771, 2.371402296351]
+  cost slack lower          = 0.153597703649
+  V_out[m,kappa] interval   = [2.562783061818, 2.585467093762]
+  value margin lower        = 0.198653061818
 
-STATUS: RHO03 GLOBAL FLUID HARDENED PASS.
-This script uses one-sided validated Phi bounds, verified inverse-Phi brackets, outward rounding, a diagonal small-time bootstrap, and a conservative active-to-post switch.
+STATUS: RHO03 PICARD FLUID CERTIFICATE PASS.
+This script verifies B_n + [0,h]F(T_n) subset T_n at every step and
+evaluates drift, cost, and value integrands on the verified step tube.
