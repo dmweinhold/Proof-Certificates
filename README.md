@@ -5,15 +5,16 @@
 This repository contains the validated numerical certificates that
 close the two asymptotic dominance theorems in the paper:
 
-- **Theorem 4.1** (Baseline, ρ=0): Asymptotic gap = 0.216135 (exact identity)
-- **Theorem 4.2** (Extension, ρ=0.3): Margin ≥ 0.214 per plot
+- **Theorem 4.1** (Baseline, ρ=0): Asymptotic gap ∈ [0.216134, 0.216136] (closed-form identity)
+- **Theorem 4.2** (Extension, ρ=0.3): Certified margin ≥ 0.198653 per plot (Picard step-tube certificate)
 
 The baseline theorem is proved via an exact E↔A symmetry of the
 fluid-limit dynamics under independence, which yields the asymptotic
 gap μ_E·φ − S_G(τ) in closed form. The ρ=0.3 extension uses the
 general fluid-limit architecture that tracks Green's actual per-turn
-ecological value through a deterministic ODE on the survivor pool
-state, closed by validated interval-Euler integration.
+ecological value and agricultural cost through a deterministic ODE on
+the survivor pool state, closed by a validated Picard step-tube
+enclosure with verified inclusion at every step.
 
 ## Quick Start
 
@@ -62,38 +63,40 @@ Both theorems share the following setup:
 | S_G(τ) | 1.277736 | Farmer's ecological capture under ME (= Green's A-spend, by symmetry) |
 | **Certified gap** | **[0.216134, 0.216136]** | **μ_E·φ − S_G(τ) (exact identity)** |
 
-### Extension (ρ=0.3) — Fluid-Limit + Cost Certificate
+### Extension (ρ=0.3) — Picard Step-Tube Certificate
 
-| Constant | Value | Definition |
-|----------|-------|-----------|
+| Constant | Value | Source |
+|----------|-------|--------|
 | ρ | 0.3 | Latent Gaussian correlation |
 | σ | √(1−0.09) ≈ 0.9539 | Conditional standard deviation |
 | φ | 0.295816 | Benchmark split |
-| J | 50 | Number of Farmer-active cost bands |
 | κ_low | 0.620816 | Certified Green affordability horizon |
-| τ (fluid) | ≤ 0.31291 | Farmer exhaustion in fluid limit |
-| c_up^FA | ≤ 1.4723 | Farmer-active band cost total |
-| c_up^total | ≤ 2.5148 | Full certified cost (bands + continuation) |
-| ∫e(c(s))ds | ≥ 2.5785 | Fluid-limit ME ecological value |
-| Θ_{0.3} | ≤ 2.3642 | MX threshold |
-| **Certified margin** | **≥ 0.214** | **Fluid-limit integral − Θ_{0.3}** |
+| τ (fluid) | ≤ 0.31371 | Farmer exhaustion in fluid limit (Picard) |
+| c_G(κ_low) | ∈ [2.353234, 2.371402] | Green cost accumulator (Picard) |
+| Cost slack | ≥ 0.153597 | 2.525 − c_G upper |
+| v_out(κ_low) | ∈ [2.562783, 2.585467] | Outside-prefix value accumulator (Picard) |
+| Θ_{0.3} | ≤ 2.36413 | MX threshold (static quadrature) |
+| **Certified margin** | **≥ 0.198653** | v_out lower − Θ_{0.3} |
 
 ## Repository Structure
 
+```
 certificates/
-├── README.md                    (this file)
+├── README.md                                        (this file)
 ├── requirements.txt
 ├── baseline/
 │   ├── baseline_closed_form_certificate.py          # E↔A symmetry identity
 │   ├── baseline_closed_form_certificate.txt
 │   └── baseline_closed_form_certificate_summary.json
 └── rho03/
-├── rho03_production_certificate.py              # cost certificate
-├── rho03_production_certificate.txt
-├── rho03_production_certificate.csv             # 50-band cost table
-├── rho03_production_certificate.json
-├── rho03_fluid_limit_certificate.py             # value certificate
-└── rho03_fluid_limit_certificate.txt
+    ├── rho03_production_certificate.py              # Picard cost-side report
+    ├── rho03_production_certificate.txt
+    ├── rho03_production_certificate.json
+    ├── rho03_fluid_limit_certificate.py             # Picard value-side report
+    ├── rho03_fluid_limit_certificate.txt
+    ├── rho03_fluid_limit_certificate.json
+    └── rho03_static_quadrature_intervals.json       # Supplementary static-quadrature intervals
+```
 
 ## Certificate Descriptions
 
@@ -109,7 +112,8 @@ marginals.
 3. S_G(τ) bracket via monotonicity of S_G
 4. μ_E·φ exactly (μ_E and φ both computed exactly)
 5. Gap = μ_E·φ − S_G(τ) with certified enclosure [0.216134, 0.216136]
-6. Sanity checks: quadratic residual for φ, S_F residual for τ, positivity of gap
+6. Sanity checks: quadratic residual for φ, S_F residual for τ,
+   positivity of gap
 
 **Key insight:** Under ρ=0 with identical marginals, the fluid-limit
 dynamics are symmetric in the two coordinates (u(s) = v(s)). This
@@ -122,57 +126,83 @@ asymptotic gap.
 All operations use monotonicity of S_G on [0, 1/2] to produce
 rigorous enclosures. No ODE solver.
 
-### rho03_production_certificate.py (cost side)
+**Outputs:**
+- `baseline_closed_form_certificate.txt` (human-readable report)
+- `baseline_closed_form_certificate_summary.json` (machine-readable)
 
-Certifies the COST side of the ρ=0.3 extension: Green remains
-affordable through κ_low = 0.620816.
+### rho03_production_certificate.py (cost side, Picard step-tube)
 
-**What it verifies:**
-1. 50-band Farmer-active costs: c_up^FA ≤ 1.4723
-2. Continuation cost validates within budget
-3. Total cost: c_up^total ≤ 2.5148 < 2.525
-4. Therefore: K_N^ME / N ≥ 0.620816 − o_p(1)
-
-**Cost notation:**
-- c_up^FA = Farmer-active band total ≤ 1.4723 (used in Ω_φ^N discharge)
-- c_up^total = c_up^FA + continuation cost ≤ 2.5148 (used in κ_low certification)
-
-**Key dependency:** Uses the maxA-topY cost monotonicity lemma to
-validate that Farmer's interference can only reduce Green's
-per-band costs.
-
-**Arithmetic:** One-sided Abramowitz-Stegun Φ bounds (published
-uniform error ≤ 7.5×10⁻⁸) in both float and Decimal arithmetic.
-
-### rho03_fluid_limit_certificate.py (value side)
-
-Certifies the VALUE side of the ρ=0.3 extension by tracking Green's
-actual ecological value through the fluid-limit ODE.
+Certifies the **cost side** of the ρ=0.3 extension through a validated
+Picard step-tube enclosure: Green's agricultural cost accumulator
+through κ_low = 0.620816 stays strictly below the budget 2.525.
 
 **What it verifies:**
-1. The piecewise ODE system for the state (u, v, b_F, b_G) is
-   integrated from s = ε to s = κ_low = 0.620816
-2. Farmer exhaustion occurs at τ ≤ 0.31291
-3. Green's ecological value integral: ∫e(c(s))ds ≥ 2.5785
-4. MX threshold: Θ_{0.3} ≤ 2.3642
-5. Margin: ≥ 0.214
+At each of the 6209 integration steps (h = 10⁻⁴):
+1. Picard inclusion `B_n + [0,h]·F(T_n) ⊆ T_n` is verified by direct
+   coordinate-by-coordinate interval containment check
+2. G_A interval quadrature (96 cells) returns intervals with strictly
+   positive denominator lower endpoint
+3. Diagonal small-time bootstrap `s_0·F_diag(U_trial) ≤ U_trial`
+4. Three-phase state machine {active, uncertain, post} across the
+   Farmer-exhaustion transition (3127 active + 10 uncertain + 3072 post)
 
-**Architecture:** During the active phase [ε, τ], both the Farmer
-frontier u(s) and the Green cutoff v(s) evolve under a coupled ODE
-derived from the exact dynamic survivor law (Lemma lem:dynamic-survivor-law).
-At Farmer exhaustion (transversal crossing of b_F = 0), u freezes
-and only v continues to evolve. The launch share ε > 0 sidesteps
-the non-Lipschitz corner at (u, v) = (0, 0); the trajectory is
-glued from this launch via the launch lemma (Proposition
-prop:rho03-initial-eps in the paper). Green's per-turn ecological
-value is e(c(s)) = 10 − 9.9·v(s) throughout. The value integral
-is accumulated from m = 0.10 onward.
+**Outputs:**
+- `c_G(κ_low) ∈ [2.353234, 2.371402]` (Green cost accumulator)
+- Cost slack lower bound ≥ 0.153597
+- Farmer exhaustion upper time τ ≤ 0.31371
+- Frozen u-interval at κ_low: [0.426937, 0.430911]
 
-**Arithmetic:** Conservative interval-Euler enclosure with
-monotonicity-based one-sided bounds. All Φ evaluations use
-Abramowitz-Stegun one-sided bounds (published error ≤ 7.5×10⁻⁸).
-The margin (0.214) is large relative to the cumulative Φ-pad error
-(~6×10⁻⁴).
+**Arithmetic:** IEEE 754 double with `math.nextafter` outward
+rounding. One-sided Abramowitz-Stegun Φ bounds (uniform error
+≤ 7.5×10⁻⁸) for all Φ evaluations. Verified inverse-normal brackets
+via binary search against the A-S bounds.
+
+### rho03_fluid_limit_certificate.py (value side, Picard step-tube)
+
+Certifies the **value side** of the ρ=0.3 extension through the same
+Picard step-tube integration, with an augmented validated state that
+tracks Green's outside-prefix ecological value accumulator.
+
+**What it verifies:**
+On the same grid as the cost certificate:
+1. Farmer exhaustion: τ ≤ 0.31371
+2. Value accumulator: `v_out(κ_low) ∈ [2.562783, 2.585467]`
+3. MX threshold: Θ_{0.3} ≤ 2.36413
+4. Certified margin: ≥ 0.198653
+
+**Architecture:** During the active phase [s_0, τ], both the Farmer
+frontier u(s) and the Green cutoff v(s) evolve under the coupled
+fluid-limit ODE with budget and accumulator drifts. At Farmer
+exhaustion (transversal b_F = 0 crossing), u freezes and only
+(v, b_G, c_G, v_out) continue to evolve. The launch share s_0 = 10⁻⁵
+sidesteps the non-Lipschitz corner at (u, v) = (0, 0); the trajectory
+is glued from this launch via a validated diagonal bootstrap.
+
+**Green's per-step cost** is `G_A(u, v) = E[A | Y = q(v), X ≤ q(u)]`,
+the conditional agricultural cost given Green's max-Y selection over
+the Farmer-truncated host. Green's per-step ecological value is
+`e(c(s)) = 10 − 9.9·v(s)`. The value integral is accumulated from
+m = 0.10 onward.
+
+**Arithmetic:** Same as the cost certificate, plus Picard tube
+inclusion verified at every step.
+
+### rho03_static_quadrature_intervals.json (supplementary)
+
+Static scalar enclosures that enter the ρ=0.3 theorem chain but are
+not produced by the Picard step integration: the ratio-cut thresholds
+r_m(0.3) and r_φ(0.3), the MX prefix value M_X(0.10, 0.3), and the
+MX-side Green affordability margin C_R^{(0.3)}(r_φ(0.3)).
+
+**Keys:**
+- `ratio_cuts_rho03` — `r_m_interval`, `r_phi_interval`
+- `mx_prefix_value_rho03` — `M_X_interval = [0.59221770, 0.59221775]`
+- `mx_affordability_rho03` — `C_R_interval = [0.679, 0.685]`, margin
+  ≥ 1.83 below μ_A/2 = 2.525
+
+These intervals are produced by the same outward-rounded quadrature
+primitives used in the Picard step certificates (Abramowitz-Stegun
+Φ bounds, IEEE nextafter rounding, verified inverse-normal brackets).
 
 ## How the Certificates Combine
 
@@ -182,29 +212,37 @@ The margin (0.214) is large relative to the cumulative Φ-pad error
 via the closed-form identity. The exact E↔A symmetry makes
 separate cost and value certificates unnecessary.
 
-### Extension (ρ=0.3) — two scripts
+### Extension (ρ=0.3) — Picard certificates plus static quadrature
 
-1. **rho03_production_certificate.py** proves Green can afford to
-   keep shopping through κ_low (cost side)
-2. **rho03_fluid_limit_certificate.py** proves the ecological
-   value Green accumulates exceeds the MX benchmark (value side)
+1. `rho03_production_certificate.py` certifies the cost side:
+   Green can afford to keep shopping through κ_low
+2. `rho03_fluid_limit_certificate.py` certifies the value side:
+   Green's outside-prefix ecological value exceeds Θ_{0.3}
+3. `rho03_static_quadrature_intervals.json` supplies the scalar
+   enclosures (ratio cuts, MX prefix value, affordability margin)
+   referenced as theorem inputs in the paper
 
-Together: Green buys enough items (cost certificate) and those
-items have enough ecological value (fluid-limit certificate) to
-dominate MX.
+Both Picard certificates share the same validated state and produce
+unified accumulator intervals on a shared integration grid. Together:
+Green buys enough items (cost accumulator), those items have enough
+ecological value (value accumulator), and the supporting static
+inputs are independently verified (static quadrature JSON).
 
 ## Cross-References to Paper
 
-| Certificate output | Paper proposition |
+| Certificate output | Paper reference |
 |-------------------|-------------------|
 | φ to 80-digit precision | Proposition (MX Farmer-exhaustion share) |
-| τ bracket | Proof of Theorem 4.1 (numerical evaluation) |
+| τ (baseline) bracket | Proof of Theorem 4.1 |
 | μ_E·φ − S_G(τ) ∈ [0.216134, 0.216136] | Theorem 4.1 (exact gap) |
-| c_up^FA ≤ 1.4723 | Cost certificate / Ω_φ^N discharge |
-| c_up^total ≤ 2.515 | Cost certificate corollary (κ_low) |
-| κ_low = 0.620816 | Affordability bootstrap (Lemma lem:baseline-affordability-compact, ρ=0.3 version) |
-| ∫e(c(s))ds ≥ 2.579 | Proposition prop:rho03-global-fluid-convergence |
-| ρ=0.3 margin ≥ 0.214 | Corollary cor:rho03-certificate |
+| c_G(κ_low) ∈ [2.353234, 2.371402] | Lemma lem:rho03-ode-cost-certificate |
+| Cost slack ≥ 0.153597 | Proposition prop:rho03-kappa-band-appendix |
+| κ_low = 0.620816 | Affordability bootstrap |
+| v_out(κ_low) ∈ [2.562783, 2.585467] | Lemma lem:rho03-ode-value-certificate |
+| ρ=0.3 margin ≥ 0.198653 | Corollary cor:rho03-certificate |
+| ratio_cuts_rho03 | Equation eq:ratio-cuts-rho03 |
+| mx_prefix_value_rho03 | Proposition prop:rho03-prefix-appendix |
+| mx_affordability_rho03 | Lemma lem:mx-green-affordability-rho03 |
 
 ## Proof Architecture Summary
 
@@ -214,25 +252,31 @@ dominate MX.
 2. Symmetric ODE: u(s) = v(s) = 1 − √(1−2s)
 3. E↔A symmetry: Farmer's per-turn E equals Green's per-turn A
 4. Closed-form identity: asymptotic gap = μ_E·φ − S_G(τ)
-5. **Certified gap: 0.216135 (exact)**
+5. **Certified gap: [0.216134, 0.216136]**
 
-### Extension (ρ=0.3) — ODE Fluid Limit
+### Extension (ρ=0.3) — Picard Step-Tube Certificate
 
-1. Prefix wedge: +0.309 (amplified by correlation)
-2. Dynamic survivor law → closed 4D state (u, v, b_F, b_G)
-3. Launch lemma → joint-mass constraint identifies Z(ε)
-4. Cost side: maxA-topY lemma → band costs valid → κ_low = 0.621
-5. Ω_φ^N discharge: Farmer-active cost 1.473 ≪ budget 2.525
-6. Affordability bootstrap: Green plays exact argmax-Y on [m, κ_low]
-7. Value side: fluid-limit ODE tracking v(s) = e(c(s))
-8. Piecewise ODE: active phase (both evolve) → post-Farmer (u freezes)
-9. **Certified margin: ≥ 0.214**
+1. Fluid-limit ODE in tail coordinates with correct Green drift
+   `ḃ_G = −G_A(u, v)` (conditional agricultural cost, not ecological value)
+2. Validated state augmented with cost and value accumulators
+3. Picard step-tube inclusion `B_n + [0,h]·F(T_n) ⊆ T_n` verified
+   at every step by direct interval containment
+4. 96-cell interval quadrature encloses G_A on every tube
+5. Three-phase state machine {active, uncertain, post} handles the
+   Farmer-exhaustion transition rigorously
+6. Cost accumulator: c_G(κ_low) ≤ 2.371402 ⟹ Green stays solvent
+7. Value accumulator: v_out(κ_low) ≥ 2.562783
+8. MX threshold Θ_{0.3} ≤ 2.36413 from static quadrature
+9. **Certified margin: ≥ 0.198653**
 
 ## Requirements
 
+```
 mpmath>=1.3.0
 scipy>=1.10.0
 numpy>=1.24.0
+```
+
 Python ≥ 3.10.
 
 ## Reproducing the Certificates
@@ -245,15 +289,12 @@ python rho03_production_certificate.py
 python rho03_fluid_limit_certificate.py
 ```
 
-Expected runtime: ~2 seconds for baseline (closed-form), ~5 minutes
-for ρ=0.3 cost certificate, ~30 seconds for fluid-limit certificate.
-
 Scripts are deterministic. Identical output expected on any machine
 with the specified library versions.
 
 ## Zenodo Archive
 
-DOI 10.5281/zenodo.19598799
+DOI: 10.5281/zenodo.19598799
 
 ## Citation
 
@@ -263,10 +304,3 @@ Two-Value Space." [Journal TBD].
 ## License
 
 MIT License.
-
-
-
-
-
-
-

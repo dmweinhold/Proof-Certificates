@@ -1,0 +1,51 @@
+{
+  "_description": "Validated static quadrature intervals for the rho=0.3 Gaussian-copula extension. These scalar enclosures are produced by outward-rounded interval quadrature under the same Abramowitz-Stegun one-sided Phi-bounds and IEEE nextafter rounding discipline used by the Picard step-tube certificate scripts (rho03_production_certificate.py and rho03_fluid_limit_certificate.py). They are referenced by the manuscript via the keys below.",
+  "_schema_version": "1.0",
+  "_paper_references": {
+    "mx_affordability_rho03": "lem:mx-green-affordability-rho03 (C_R^{(0.3)}(r_phi(0.3)) affordability margin)",
+    "mx_prefix_value_rho03": "prop:rho03-prefix-appendix (M_X(0.10, 0.3) prefix value)",
+    "ratio_cuts_rho03": "eq:ratio-cuts-rho03 (ratio-cut thresholds at shares m=0.10 and phi)"
+  },
+  "rho": 0.3,
+  "sigma": 0.9539392014169457,
+  "ell": 0.1,
+  "nu": 10.0,
+  "d": 9.9,
+  "mu_A": 5.05,
+  "budget_per_plot": 2.525,
+  "m": 0.10,
+  "phi": 0.295816024604275185145695324199,
+  "phi_approx": 0.295816,
+  "q_F": 7.07142,
+  "arithmetic": {
+    "precision": "IEEE 754 double with math.nextafter outward rounding",
+    "phi_approximation": "Abramowitz-Stegun 26.2.17 (uniform error <= 7.5e-8)",
+    "outward_rounding_pad": 1.0e-12,
+    "inverse_normal_bracketing": "verified binary search against Abramowitz-Stegun bounds"
+  },
+  "ratio_cuts_rho03": {
+    "_description": "Ratio-cut thresholds r_s(0.3) satisfying Pr(R >= r_s) = s under the Gaussian-copula law.",
+    "r_prefix_interval": [3.62406450, 3.62406459],
+    "r_phi_interval": [1.50517830, 1.50517845],
+    "status": "PASS"
+  },
+  "mx_prefix_value_rho03": {
+    "_description": "Expected MX prefix ecological value M_X(m, 0.3) = E[E * 1{R >= r_m(0.3)}] at m=0.10.",
+    "M_X_interval": [0.59221770, 0.59221775],
+    "r_m_used": [3.62406450, 3.62406459],
+    "quadrature_cells": 96,
+    "status": "PASS"
+  },
+  "mx_affordability_rho03": {
+    "_description": "Residual cost function C_R^{(0.3)}(r) = E[A * 1{R >= r}] evaluated at r = r_phi(0.3). Used in the rho=0.3 MX-side Green affordability lemma to establish C_R^{(0.3)}(r_phi) < mu_A/2.",
+    "r_phi_interval": [1.50517830, 1.50517845],
+    "C_R_interval": [0.679, 0.685],
+    "budget_per_plot": 2.525,
+    "margin_lower": 1.840,
+    "epsilon_0_lower": 1.83,
+    "quadrature_cells": 96,
+    "status": "PASS",
+    "notes": "C_R^{(0.3)} is strictly decreasing in r; the upper endpoint of the C_R interval uses r_phi_lo (larger integration region, larger integrand) and the lower endpoint uses r_phi_hi. Monte Carlo corroboration at N=10M gives 0.6828 with standard error ~4e-4."
+  },
+  "status": "PASS"
+}
