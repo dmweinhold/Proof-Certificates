@@ -3,104 +3,52 @@
 ## Overview
 
 This repository contains the validated numerical certificates that
-close the two asymptotic dominance theorems in the paper:
+support the theoretical results in the paper. The proof architecture
+distinguishes between **theorem-critical** certificates (whose intervals
+close a step in the formal proof chain) and **supplementary** certificates
+(which document the quantitative magnitude of effects established
+analytically elsewhere).
 
-- **Theorem 4.1** (Baseline, ρ=0): Asymptotic gap ∈ [0.216134, 0.216136] (closed-form identity)
-- **Theorem 4.2** (Extension, ρ=0.3): Certified margin ≥ 0.198653 per plot (Picard step-tube certificate)
+- **Theorem 5.1** (`thm:claims-tilt`, Claims World, finite-board priority-tilt
+  monotonicity): Proved pathwise, distribution-free, and analytically
+  in the paper's in-paper appendix. **No numerical certificate required.**
+  A supplementary iid-uniform fluid-limit benchmark is archived here for
+  scale calibration only.
+- **Theorem 5.2** (`thm:bronze`, Budget World, ρ=0): Asymptotic gap
+  ∈ [0.216134, 0.216136] (closed-form E↔A symmetry identity, validated
+  to 80-digit precision).
+- **Theorem 5.3** (`thm:bronze-rho`, Budget World, ρ=0.3): Certified
+  margin ≥ 0.198653 per plot (Picard step-tube certificate).
 
-The baseline theorem is proved via an exact E↔A symmetry of the
-fluid-limit dynamics under independence, which yields the asymptotic
-gap μ_E·φ − S_G(τ) in closed form. The ρ=0.3 extension uses the
-general fluid-limit architecture that tracks Green's actual per-turn
-ecological value and agricultural cost through a deterministic ODE on
-the survivor pool state, closed by a validated Picard step-tube
-enclosure with verified inclusion at every step.
+The Budget-World baseline theorem is proved via an exact E↔A symmetry of the
+fluid-limit dynamics under independence, which yields the asymptotic gap
+μ_E·φ − S_G(τ) in closed form. The ρ=0.3 extension uses the general
+fluid-limit architecture that tracks Green's actual per-turn ecological
+value and agricultural cost through a deterministic ODE on the survivor
+pool state, closed by a validated Picard step-tube enclosure with verified
+inclusion at every step.
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
+
+# Theorem-critical (Budget World)
 python certificates/baseline/baseline_closed_form_certificate.py
 python certificates/rho03/rho03_production_certificate.py
 python certificates/rho03/rho03_fluid_limit_certificate.py
+
+# Supplementary (Claims World iid-uniform benchmark)
+python certificates/claims/claims_uniform_ratio_frontier_interval_certificate.py
 ```
 
 Each script prints a self-contained report ending with PASS or FAIL.
 
-## Frozen Theorem Objects
+## Theorem-Critical Certificates
 
-Both theorems share the following setup:
+### Budget World, ρ=0 — `thm:bronze` (Theorem 5.2)
 
-| Object | Definition |
-|--------|-----------|
-| DGP | Marginals U[0.1, 10], Gaussian copula |
-| Farmer strategy | Naïve max-A (buys most expensive available) |
-| Green strategy ME | Max-E (buys highest ecological value) |
-| Green strategy MX | Max-E/A (buys highest ratio available) |
-| Budget parity | B_F = B_G = (1/2) Σ A_i |
-| Outcome | Purchased Conservation (PC) |
-| Prefix share | m = 0.10 |
-
-## Frozen Constants
-
-### Shared
-
-| Constant | Value | Definition |
-|----------|-------|-----------|
-| ℓ | 0.1 | Lower bound of marginal support |
-| ν | 10 | Upper bound of marginal support |
-| μ_E = μ_A | 5.05 | Marginal means (identical) |
-| Budget/N | 2.525 | μ_A/2 |
-| m | 0.10 | Prefix share |
-
-### Baseline (ρ=0) — E↔A Symmetry Identity
-
-| Constant | Value | Definition |
-|----------|-------|-----------|
-| φ | 0.295816024604... | MX Farmer-exhaustion share; root of 9.9φ² − 20φ + 5.05 = 0 |
-| τ | 0.304718564833... | ME Farmer-exhaustion share; root of S_F(τ) = 2.525 |
-| μ_E·φ | 1.493871 | MX-side total ecological value |
-| S_G(τ) | 1.277736 | Farmer's ecological capture under ME (= Green's A-spend, by symmetry) |
-| **Certified gap** | **[0.216134, 0.216136]** | **μ_E·φ − S_G(τ) (exact identity)** |
-
-### Extension (ρ=0.3) — Picard Step-Tube Certificate
-
-| Constant | Value | Source |
-|----------|-------|--------|
-| ρ | 0.3 | Latent Gaussian correlation |
-| σ | √(1−0.09) ≈ 0.9539 | Conditional standard deviation |
-| φ | 0.295816 | Benchmark split |
-| κ_low | 0.620816 | Certified Green affordability horizon |
-| τ (fluid) | ≤ 0.31371 | Farmer exhaustion in fluid limit (Picard) |
-| c_G(κ_low) | ∈ [2.353234, 2.371402] | Green cost accumulator (Picard) |
-| Cost slack | ≥ 0.153597 | 2.525 − c_G upper |
-| v_out(κ_low) | ∈ [2.562783, 2.585467] | Outside-prefix value accumulator (Picard) |
-| Θ_{0.3} | ≤ 2.36413 | MX threshold (static quadrature) |
-| **Certified margin** | **≥ 0.198653** | v_out lower − Θ_{0.3} |
-
-## Repository Structure
-
-```
-certificates/
-├── README.md                                        (this file)
-├── requirements.txt
-├── baseline/
-│   ├── baseline_closed_form_certificate.py          # E↔A symmetry identity
-│   ├── baseline_closed_form_certificate.txt
-│   └── baseline_closed_form_certificate_summary.json
-└── rho03/
-    ├── rho03_production_certificate.py              # Picard cost-side report
-    ├── rho03_production_certificate.txt
-    ├── rho03_production_certificate.json
-    ├── rho03_fluid_limit_certificate.py             # Picard value-side report
-    ├── rho03_fluid_limit_certificate.txt
-    ├── rho03_fluid_limit_certificate.json
-    └── rho03_static_quadrature_intervals.json       # Supplementary static-quadrature intervals
-```
-
-## Certificate Descriptions
-
-### baseline_closed_form_certificate.py (PRIMARY for ρ=0)
+#### baseline_closed_form_certificate.py — PRIMARY for ρ=0
 
 Certifies the baseline asymptotic dominance theorem using the exact
 E↔A symmetry identity that holds under independence and identical
@@ -130,7 +78,9 @@ rigorous enclosures. No ODE solver.
 - `baseline_closed_form_certificate.txt` (human-readable report)
 - `baseline_closed_form_certificate_summary.json` (machine-readable)
 
-### rho03_production_certificate.py (cost side, Picard step-tube)
+### Budget World, ρ=0.3 — `thm:bronze-rho` (Theorem 5.3)
+
+#### rho03_production_certificate.py (cost side, Picard step-tube)
 
 Certifies the **cost side** of the ρ=0.3 extension through a validated
 Picard step-tube enclosure: Green's agricultural cost accumulator
@@ -157,7 +107,7 @@ rounding. One-sided Abramowitz-Stegun Φ bounds (uniform error
 ≤ 7.5×10⁻⁸) for all Φ evaluations. Verified inverse-normal brackets
 via binary search against the A-S bounds.
 
-### rho03_fluid_limit_certificate.py (value side, Picard step-tube)
+#### rho03_fluid_limit_certificate.py (value side, Picard step-tube)
 
 Certifies the **value side** of the ρ=0.3 extension through the same
 Picard step-tube integration, with an augmented validated state that
@@ -187,7 +137,7 @@ m = 0.10 onward.
 **Arithmetic:** Same as the cost certificate, plus Picard tube
 inclusion verified at every step.
 
-### rho03_static_quadrature_intervals.json (supplementary)
+#### rho03_static_quadrature_intervals.json (supplementary scalars)
 
 Static scalar enclosures that enter the ρ=0.3 theorem chain but are
 not produced by the Picard step integration: the ratio-cut thresholds
@@ -204,49 +154,175 @@ These intervals are produced by the same outward-rounded quadrature
 primitives used in the Picard step certificates (Abramowitz-Stegun
 Φ bounds, IEEE nextafter rounding, verified inverse-normal brackets).
 
-## How the Certificates Combine
+## Supplementary Benchmark Certificates
 
-### Baseline (ρ=0) — single script
+### Claims World iid-uniform fluid benchmark
 
-`baseline_closed_form_certificate.py` alone certifies the theorem
-via the closed-form identity. The exact E↔A symmetry makes
-separate cost and value certificates unnecessary.
+**Important framing.** Theorem 5.1 (`thm:claims-tilt`) is proved
+analytically in the paper's in-paper appendix as a finite-board,
+pathwise, distribution-free weak-dominance result under the max-A
+Farmer rule. **The certificate below is not part of that proof.** It
+is a validated iid-uniform fluid-limit benchmark showing that the
+theorem's weak dominance is quantitatively large in the symmetric
+baseline, not merely nonnegative. Its role is scale calibration —
+documenting that the iid-uniform asymptotic gap is on the order of
+half a unit per plot, which connects the analytic theorem to the
+magnitude of effects observed in simulations.
 
-### Extension (ρ=0.3) — Picard certificates plus static quadrature
+#### claims_uniform_ratio_frontier_interval_certificate.py
 
-1. `rho03_production_certificate.py` certifies the cost side:
-   Green can afford to keep shopping through κ_low
-2. `rho03_fluid_limit_certificate.py` certifies the value side:
-   Green's outside-prefix ecological value exceeds Θ_{0.3}
-3. `rho03_static_quadrature_intervals.json` supplies the scalar
-   enclosures (ratio cuts, MX prefix value, affordability margin)
-   referenced as theorem inputs in the paper
+Certifies the asymptotic Claims World iid-uniform fluid-limit gap at
+budget share α = 1/2 (equal claims).
 
-Both Picard certificates share the same validated state and produce
-unified accumulator intervals on a shared integration grid. Together:
-Green buys enough items (cost accumulator), those items have enough
-ecological value (value accumulator), and the supporting static
-inputs are independently verified (static quadrature JSON).
+**What it verifies:**
+1. V_R(1/2) ∈ [2.8783742, 2.8789214] (MX ratio-frontier ecological value)
+2. V_E(1/2) = 3.35 exactly (Max Environment ecological value)
+3. Gap = V_E(1/2) − V_R(1/2) ∈ [0.4710786, 0.4716258]
+4. Certificate tests: V_R upper bound < 2.88, gap lower bound > 0.47
+
+**Key construction:** The certificate decomposes V_R into three
+analytic integrals (I1, I2, I3) over the three regimes of the
+ratio-frontier dynamics, computes interval enclosures using analytic
+monotonicity of the Regime II and Regime III integrands plus
+left/right Riemann sums, and verifies the four transition points
+(r12, a12, a1, rF) by interval root-bracketing.
+
+**Arithmetic:** mpmath interval arithmetic at 90-digit precision, with
+2000 subdivisions per monotone integral. No simulation, no random
+seed. The certificate is deliberately loose — the bounds (V_R < 2.88,
+gap > 0.47) are well inside the certified enclosures, providing ample
+slack for the calibration claim.
+
+**Outputs:**
+- `claims_uniform_ratio_frontier_interval_certificate.txt`
+- `claims_uniform_ratio_frontier_interval_certificate.json`
+- `claims_uniform_ratio_frontier_interval_certificate.md`
+
+#### claims_uniform_ratio_frontier_certificate.py (diagnostic)
+
+A high-precision analytic / non-interval diagnostic companion to the
+interval wrapper above. Useful for inspecting the regime structure
+and verifying intermediate quantities; not the validated certificate.
+
+## Frozen Theorem Objects
+
+The Budget-World theorems share the following setup:
+
+| Object | Definition |
+|--------|-----------|
+| DGP | Marginals U[0.1, 10], Gaussian copula |
+| Farmer strategy | Naïve max-A (buys most expensive available) |
+| Green strategy ME | Max-E (buys highest ecological value) |
+| Green strategy MX | Max-E/A (buys highest ratio available) |
+| Budget parity | B_F = B_G = (1/2) Σ A_i |
+| Outcome | Purchased Conservation (PC) |
+| Prefix share | m = 0.10 |
+
+The Claims World benchmark uses the same DGP and Farmer rule but
+operates in the equal-claims, full-leakage regime without prices or
+budgets.
+
+## Frozen Constants
+
+### Shared
+
+| Constant | Value | Definition |
+|----------|-------|-----------|
+| ℓ | 0.1 | Lower bound of marginal support |
+| ν | 10 | Upper bound of marginal support |
+| μ_E = μ_A | 5.05 | Marginal means (identical) |
+| Budget/N | 2.525 | μ_A/2 |
+| m | 0.10 | Prefix share |
+
+### Budget World baseline (ρ=0) — E↔A Symmetry Identity
+
+| Constant | Value | Definition |
+|----------|-------|-----------|
+| φ | 0.295816024604... | MX Farmer-exhaustion share; root of 9.9φ² − 20φ + 5.05 = 0 |
+| τ | 0.304718564833... | ME Farmer-exhaustion share; root of S_F(τ) = 2.525 |
+| μ_E·φ | 1.493871 | MX-side total ecological value |
+| S_G(τ) | 1.277736 | Farmer's ecological capture under ME (= Green's A-spend, by symmetry) |
+| **Certified gap** | **[0.216134, 0.216136]** | **μ_E·φ − S_G(τ) (exact identity)** |
+
+### Budget World extension (ρ=0.3) — Picard Step-Tube Certificate
+
+| Constant | Value | Source |
+|----------|-------|--------|
+| ρ | 0.3 | Latent Gaussian correlation |
+| σ | √(1−0.09) ≈ 0.9539 | Conditional standard deviation |
+| φ | 0.295816 | Benchmark split |
+| κ_low | 0.620816 | Certified Green affordability horizon |
+| τ (fluid) | ≤ 0.31371 | Farmer exhaustion in fluid limit (Picard) |
+| c_G(κ_low) | ∈ [2.353234, 2.371402] | Green cost accumulator (Picard) |
+| Cost slack | ≥ 0.153597 | 2.525 − c_G upper |
+| v_out(κ_low) | ∈ [2.562783, 2.585467] | Outside-prefix value accumulator (Picard) |
+| Θ_{0.3} | ≤ 2.36413 | MX threshold (static quadrature) |
+| **Certified margin** | **≥ 0.198653** | v_out lower − Θ_{0.3} |
+
+### Claims World iid-uniform benchmark (supplementary)
+
+| Constant | Value | Definition |
+|----------|-------|-----------|
+| V_E(1/2) | 3.35 (exact) | ME asymptotic ecological value at α = 1/2 |
+| V_R(1/2) | ∈ [2.8783742, 2.8789214] | MX ratio-frontier asymptotic ecological value at α = 1/2 |
+| **Certified gap** | **∈ [0.4710786, 0.4716258]** | **V_E − V_R (validated interval)** |
+
+## Repository Structure
+
+```
+certificates/
+├── README.md                                              (this file)
+├── requirements.txt
+├── baseline/
+│   ├── baseline_closed_form_certificate.py                # E↔A symmetry identity
+│   ├── baseline_closed_form_certificate.txt
+│   └── baseline_closed_form_certificate_summary.json
+├── rho03/
+│   ├── rho03_production_certificate.py                    # Picard cost-side report
+│   ├── rho03_production_certificate.txt
+│   ├── rho03_production_certificate.json
+│   ├── rho03_fluid_limit_certificate.py                   # Picard value-side report
+│   ├── rho03_fluid_limit_certificate.txt
+│   ├── rho03_fluid_limit_certificate.json
+│   └── rho03_static_quadrature_intervals.json             # Supplementary static-quadrature intervals
+└── claims/
+    ├── claims_uniform_ratio_frontier_certificate.py             # Diagnostic (non-interval)
+    ├── claims_uniform_ratio_frontier_interval_certificate.py    # Validated certificate
+    ├── claims_uniform_ratio_frontier_interval_certificate.txt
+    ├── claims_uniform_ratio_frontier_interval_certificate.json
+    └── claims_uniform_ratio_frontier_interval_certificate.md
+```
 
 ## Cross-References to Paper
 
-| Certificate output | Paper reference |
-|-------------------|-------------------|
-| φ to 80-digit precision | Proposition (MX Farmer-exhaustion share) |
-| τ (baseline) bracket | Proof of Theorem 4.1 |
-| μ_E·φ − S_G(τ) ∈ [0.216134, 0.216136] | Theorem 4.1 (exact gap) |
-| c_G(κ_low) ∈ [2.353234, 2.371402] | Lemma lem:rho03-ode-cost-certificate |
-| Cost slack ≥ 0.153597 | Proposition prop:rho03-kappa-band-appendix |
-| κ_low = 0.620816 | Affordability bootstrap |
-| v_out(κ_low) ∈ [2.562783, 2.585467] | Lemma lem:rho03-ode-value-certificate |
-| ρ=0.3 margin ≥ 0.198653 | Corollary cor:rho03-certificate |
-| ratio_cuts_rho03 | Equation eq:ratio-cuts-rho03 |
-| mx_prefix_value_rho03 | Proposition prop:rho03-prefix-appendix |
-| mx_affordability_rho03 | Lemma lem:mx-green-affordability-rho03 |
+| Certificate output | Paper reference | Role |
+|-------------------|-----------------|------|
+| Pathwise Claims theorem | Theorem 5.1 (`thm:claims-tilt`) | No certificate; analytic proof in `app:claims_proof` |
+| φ to 80-digit precision | Proposition (MX Farmer-exhaustion share) | Theorem-critical |
+| τ (baseline) bracket | Proof of Theorem 5.2 (`thm:bronze`) | Theorem-critical |
+| μ_E·φ − S_G(τ) ∈ [0.216134, 0.216136] | Theorem 5.2 (exact gap) | Theorem-critical |
+| c_G(κ_low) ∈ [2.353234, 2.371402] | Lemma `lem:rho03-ode-cost-certificate` | Theorem-critical |
+| Cost slack ≥ 0.153597 | Proposition `prop:rho03-kappa-band-appendix` | Theorem-critical |
+| κ_low = 0.620816 | Affordability bootstrap | Theorem-critical |
+| v_out(κ_low) ∈ [2.562783, 2.585467] | Lemma `lem:rho03-ode-value-certificate` | Theorem-critical |
+| ρ=0.3 margin ≥ 0.198653 | Theorem 5.3 (`thm:bronze-rho`), Corollary `cor:rho03-certificate` | Theorem-critical |
+| ratio_cuts_rho03 | Equation `eq:ratio-cuts-rho03` | Theorem-critical |
+| mx_prefix_value_rho03 | Proposition `prop:rho03-prefix-appendix` | Theorem-critical |
+| mx_affordability_rho03 | Lemma `lem:mx-green-affordability-rho03` | Theorem-critical |
+| V_R(1/2), V_E(1/2), gap | Claims World iid-uniform fluid benchmark | Supplementary (calibration only) |
 
 ## Proof Architecture Summary
 
-### Baseline (ρ=0) — E↔A Symmetry Identity
+### Claims World, finite-board (Theorem 5.1, `thm:claims-tilt`)
+
+Proved analytically and pathwise in the paper's in-paper appendix
+(`app:claims_proof`). The result holds on every generic finite board
+under the deterministic max-A Farmer rule, distribution-free in
+(e, a). No numerical certificate is required. The supplementary
+iid-uniform benchmark certificate above documents the asymptotic
+magnitude of the gap in the symmetric baseline.
+
+### Budget World, baseline ρ=0 (Theorem 5.2, `thm:bronze`) — E↔A Symmetry Identity
 
 1. Dynamic survivor law → factored host under independence
 2. Symmetric ODE: u(s) = v(s) = 1 − √(1−2s)
@@ -254,7 +330,7 @@ inputs are independently verified (static quadrature JSON).
 4. Closed-form identity: asymptotic gap = μ_E·φ − S_G(τ)
 5. **Certified gap: [0.216134, 0.216136]**
 
-### Extension (ρ=0.3) — Picard Step-Tube Certificate
+### Budget World, extension ρ=0.3 (Theorem 5.3, `thm:bronze-rho`) — Picard Step-Tube Certificate
 
 1. Fluid-limit ODE in tail coordinates with correct Green drift
    `ḃ_G = −G_A(u, v)` (conditional agricultural cost, not ecological value)
@@ -287,19 +363,31 @@ Each script runs independently with no arguments:
 python baseline_closed_form_certificate.py
 python rho03_production_certificate.py
 python rho03_fluid_limit_certificate.py
+python claims_uniform_ratio_frontier_interval_certificate.py
 ```
 
 Scripts are deterministic. Identical output expected on any machine
 with the specified library versions.
 
-## Zenodo Archive
+## Archive DOIs
 
-DOI: 10.5281/zenodo.19598799
+This repository hosts **proof certificates** at:
+- DOI: **10.5281/zenodo.19598799**
+
+The broader **replication / simulator package** (the dynamic
+contest simulator and its outputs) is archived separately at:
+- DOI: **10.5281/zenodo.19613421**
+
+The two archives are companions: the proof-certificate archive
+backs the formal theorems (Section 5 of the paper); the replication
+archive reproduces the simulation framework, figures, and the Bolivia
+empirical exercise.
 
 ## Citation
 
 Weinhold, D. and Andersen, L. (2026). "Adversarial Procurement in
-Two-Value Space." [Journal TBD].
+Two-Value Space: Insights and Evidence for Conservation Siting."
+SSRN Working Paper, https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6705959.
 
 ## License
 
